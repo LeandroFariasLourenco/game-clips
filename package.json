@@ -1,8 +1,9 @@
 {
-  "name": "react-example",
+  "name": "game-vault",
   "private": true,
   "version": "0.0.0",
   "type": "module",
+  "homepage": "https://leandrofariaslourenco.github.io/game-vault/",
   "scripts": {
     "dev": "vite --port=3000 --host=0.0.0.0",
     "build": "vite build",

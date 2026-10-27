@@ -17,7 +17,10 @@ const mediaBucketProxy: Record<string, ProxyOptions> = {
 };
 
 export default defineConfig(() => {
+  const base = process.env.VITE_BASE_PATH || '/';
+
   return {
+    base,
     plugins: [
       react(),
       tailwindcss(),
@@ -25,30 +28,30 @@ export default defineConfig(() => {
         registerType: 'autoUpdate',
         includeAssets: ['favicon.ico', 'apple-touch-icon.png', 'icon.svg'],
         manifest: {
-          id: '/',
+          id: base,
           name: 'Biblioteca de Jogos',
           short_name: 'Jogos',
           description: 'PWA para gerenciamento e mídias de jogos.',
           theme_color: '#121212',
           background_color: '#121212',
           display: 'standalone',
-          start_url: '/',
-          scope: '/',
+          start_url: base,
+          scope: base,
           icons: [
             {
-              src: '/pwa-192x192.png',
+              src: 'pwa-192x192.png',
               sizes: '192x192',
               type: 'image/png',
               purpose: 'any',
             },
             {
-              src: '/pwa-512x512.png',
+              src: 'pwa-512x512.png',
               sizes: '512x512',
               type: 'image/png',
               purpose: 'any',
             },
             {
-              src: '/pwa-maskable-512x512.png',
+              src: 'pwa-maskable-512x512.png',
               sizes: '512x512',
               type: 'image/png',
               purpose: 'maskable',

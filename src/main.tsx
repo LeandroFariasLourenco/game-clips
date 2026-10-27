@@ -6,6 +6,8 @@ import { HomePage } from './pages/HomePage';
 import { GameDetailsPage } from './pages/GameDetailsPage';
 import './index.css';
 
+const basename = import.meta.env.BASE_URL.replace(/\/$/, '') || '/';
+
 const router = createBrowserRouter([
   {
     element: <App />,
@@ -20,6 +22,6 @@ const router = createBrowserRouter([
       },
     ],
   },
-]);
+], { basename });
 
 createRoot(document.getElementById('root')!).render(<RouterProvider router={router} />);
