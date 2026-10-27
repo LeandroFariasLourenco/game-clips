@@ -1,0 +1,51 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <radialGradient id="bgGlow" cx="50%" cy="50%" r="50%" fx="30%" fy="30%">
+      <stop offset="0%" stop-color="#2a2e39" />
+      <stop offset="100%" stop-color="#121212" />
+    </radialGradient>
+    <linearGradient id="primaryGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#6366f1" />
+      <stop offset="50%" stop-color="#8b5cf6" />
+      <stop offset="100%" stop-color="#ec4899" />
+    </linearGradient>
+    <linearGradient id="metal" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#374151" />
+      <stop offset="100%" stop-color="#1f2937" />
+    </linearGradient>
+  </defs>
+
+  <!-- Dark Rounded Background with Safe Zone -->
+  <rect width="512" height="512" rx="112" fill="url(#bgGlow)" />
+  <rect x="16" y="16" width="480" height="480" rx="96" fill="none" stroke="rgba(255,255,255,0.08)" stroke-width="2" />
+
+  <!-- Gamepad Body -->
+  <g transform="translate(64, 110)">
+    <!-- Base Shape -->
+    <path d="M74 150 C40 150 14 176 18 214 L36 308 C44 346 80 370 120 360 C156 350 178 316 196 260 L204 236 C220 226 236 220 256 220 C276 220 292 226 308 236 L316 260 C334 316 356 350 392 360 C432 370 468 346 476 308 L494 214 C498 176 472 150 438 150 C380 150 340 180 256 180 C172 180 132 150 74 150 Z" 
+          fill="url(#metal)" stroke="rgba(255,255,255,0.15)" stroke-width="6" />
+
+    <!-- D-Pad Left -->
+    <g transform="translate(100, 200)">
+      <path d="M-10 -40 h20 v28 h28 v20 h-28 v28 h-20 v-28 h-28 v-20 h28 z" fill="#111827" stroke="#4b5563" stroke-width="3" rx="4" />
+    </g>
+
+    <!-- Action Buttons Right (Colored Diamond) -->
+    <g transform="translate(412, 210)">
+      <circle cx="0" cy="-28" r="10" fill="#ec4899" />
+      <circle cx="28" cy="0" r="10" fill="#8b5cf6" />
+      <circle cx="0" cy="28" r="10" fill="#10b981" />
+      <circle cx="-28" cy="0" r="10" fill="#3b82f6" />
+    </g>
+
+    <!-- Thumbsticks with neon accents -->
+    <circle cx="196" cy="260" r="28" fill="#1f2937" stroke="#3b82f6" stroke-width="4" />
+    <circle cx="196" cy="260" r="12" fill="#374151" />
+
+    <circle cx="316" cy="260" r="28" fill="#1f2937" stroke="#ec4899" stroke-width="4" />
+    <circle cx="316" cy="260" r="12" fill="#374151" />
+
+    <!-- Center Media Play / Gallery Indicator -->
+    <polygon points="248,155 272,170 248,185" fill="url(#primaryGrad)" />
+  </g>
+</svg>

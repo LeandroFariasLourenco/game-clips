@@ -1,0 +1,10 @@
+name = "game-clips-worker"
+main = "src/index.js"
+compatibility_date = "2025-10-11"
+compatibility_flags = ["nodejs_compat"]
+
+# Valores não secretos. Credenciais AWS entram só via `wrangler secret put`.
+[vars]
+AWS_REGION = "us-east-1"
+S3_BUCKET_NAME = "game-clips-assets-306702688592-us-east-1-an"
+CORS_ORIGIN = "*"

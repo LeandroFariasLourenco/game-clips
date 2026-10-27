@@ -1,0 +1,30 @@
+@import "tailwindcss";
+
+.image-shimmer {
+  position: absolute;
+  inset: 0;
+  background-color: #18181b;
+  overflow: hidden;
+}
+
+.image-shimmer::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    105deg,
+    transparent 0%,
+    transparent 38%,
+    rgb(82 82 91 / 0.38) 50%,
+    transparent 62%,
+    transparent 100%
+  );
+  transform: translateX(-100%);
+  animation: image-shimmer-slide 1.4s ease-in-out infinite;
+}
+
+@keyframes image-shimmer-slide {
+  100% {
+    transform: translateX(100%);
+  }
+}
