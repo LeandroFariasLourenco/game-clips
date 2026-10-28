@@ -11,7 +11,8 @@ import {
   uploadMedia,
 } from "./api";
 import { CreateGameModal } from "./CreateGameModal";
-import type { GameDetails, GameSummary, UploadKind } from "./types";
+import { SteamGridPicker } from "./SteamGridPicker";
+import type { GameDetails, GameSummary, SteamGridKind, UploadKind } from "./types";
 import "./App.css";
 
 function App() {
@@ -29,6 +30,7 @@ function App() {
   const [creating, setCreating] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
   const [removing, setRemoving] = useState(false);
+  const [steamGridKind, setSteamGridKind] = useState<SteamGridKind | null>(null);
   const selectedRef = useRef<string | null>(null);
   selectedRef.current = selectedName;
 
@@ -272,6 +274,7 @@ function App() {
                     src={assetUrl(`${details.name}/cover.jpg`, details.coverUrl)}
                     busy={uploading === "cover"}
                     onUpload={() => void handleUpload("cover")}
+                    onSteamGrid={() => setSteamGridKind("cover")}
                   />
                   <AssetCard
                     title="Banner"
@@ -280,6 +283,7 @@ function App() {
                     src={assetUrl(`${details.name}/banner.jpg`, details.bannerUrl)}
                     busy={uploading === "banner"}
                     onUpload={() => void handleUpload("banner")}
+                    onSteamGrid={() => setSteamGridKind("banner")}
                   />
                   <AssetCard
                     title="Ícone"
@@ -288,6 +292,7 @@ function App() {
                     src={assetUrl(`${details.name}/icon.png`, details.iconUrl)}
                     busy={uploading === "icon"}
                     onUpload={() => void handleUpload("icon")}
+                    onSteamGrid={() => setSteamGridKind("icon")}
                   />
                 </section>
 
@@ -365,6 +370,19 @@ function App() {
           onSubmit={handleCreate}
         />
       )}
+
+      {steamGridKind && selectedName && (
+        <SteamGridPicker
+          gameName={selectedName}
+          kind={steamGridKind}
+          applyToGame={selectedName}
+          onClose={() => setSteamGridKind(null)}
+          onApplied={async () => {
+            await loadDetails(selectedName, true);
+            setNotice(`Imagem do SteamGridDB aplicada em ${selectedName}.`);
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -417,6 +435,7 @@ function AssetCard({
   src,
   busy,
   onUpload,
+  onSteamGrid,
 }: {
   title: string;
   fileName: string;
@@ -424,6 +443,7 @@ function AssetCard({
   src: string;
   busy: boolean;
   onUpload: () => void;
+  onSteamGrid: () => void;
 }) {
   return (
     <article className="asset">
@@ -432,9 +452,14 @@ function AssetCard({
         <h3>{title}</h3>
         <p className="muted">{fileName}</p>
         <p className={present ? "ok" : "missing"}>{present ? "Presente no bucket" : "Ausente"}</p>
-        <button className="primary" disabled={busy} onClick={onUpload}>
-          {busy ? "Enviando…" : present ? "Substituir" : "Enviar"}
-        </button>
+        <div className="asset-actions">
+          <button className="primary" disabled={busy} onClick={onUpload}>
+            {busy ? "Enviando…" : present ? "Substituir" : "Enviar"}
+          </button>
+          <button className="ghost" disabled={busy} onClick={onSteamGrid}>
+            SteamGridDB
+          </button>
+        </div>
       </div>
     </article>
   );

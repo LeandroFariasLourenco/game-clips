@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent } from "react";
 import type { PickedSource } from "./api";
-import type { UploadKind } from "./types";
+import { SteamGridPicker } from "./SteamGridPicker";
+import type { SteamGridKind, UploadKind } from "./types";
 
 interface CreateGameModalProps {
   busy: boolean;
@@ -19,6 +20,7 @@ export function CreateGameModal({ busy, onClose, onSubmit }: CreateGameModalProp
   const [banner, setBanner] = useState<PickedSource | null>(null);
   const [icon, setIcon] = useState<PickedSource | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [steamGridKind, setSteamGridKind] = useState<SteamGridKind | null>(null);
 
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
@@ -83,6 +85,14 @@ export function CreateGameModal({ busy, onClose, onSubmit }: CreateGameModalProp
             value={cover}
             onChange={setCover}
             disabled={busy}
+            onSteamGrid={() => {
+              if (!name.trim()) {
+                setError("Informe o nome do jogo antes de buscar no SteamGridDB.");
+                return;
+              }
+              setError(null);
+              setSteamGridKind("cover");
+            }}
           />
           <FileField
             label="Banner"
@@ -92,6 +102,14 @@ export function CreateGameModal({ busy, onClose, onSubmit }: CreateGameModalProp
             value={banner}
             onChange={setBanner}
             disabled={busy}
+            onSteamGrid={() => {
+              if (!name.trim()) {
+                setError("Informe o nome do jogo antes de buscar no SteamGridDB.");
+                return;
+              }
+              setError(null);
+              setSteamGridKind("banner");
+            }}
           />
           <FileField
             label="Thumb"
@@ -101,6 +119,14 @@ export function CreateGameModal({ busy, onClose, onSubmit }: CreateGameModalProp
             value={icon}
             onChange={setIcon}
             disabled={busy}
+            onSteamGrid={() => {
+              if (!name.trim()) {
+                setError("Informe o nome do jogo antes de buscar no SteamGridDB.");
+                return;
+              }
+              setError(null);
+              setSteamGridKind("icon");
+            }}
           />
         </div>
 
@@ -115,6 +141,19 @@ export function CreateGameModal({ busy, onClose, onSubmit }: CreateGameModalProp
           </button>
         </footer>
       </form>
+
+      {steamGridKind && (
+        <SteamGridPicker
+          gameName={name.trim()}
+          kind={steamGridKind}
+          onClose={() => setSteamGridKind(null)}
+          onPicked={(source) => {
+            if (steamGridKind === "cover") setCover(source);
+            if (steamGridKind === "banner") setBanner(source);
+            if (steamGridKind === "icon") setIcon(source);
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -127,6 +166,7 @@ function FileField({
   value,
   onChange,
   disabled,
+  onSteamGrid,
 }: {
   label: string;
   hint: string;
@@ -135,10 +175,15 @@ function FileField({
   value: PickedSource | null;
   onChange: (value: PickedSource | null) => void;
   disabled: boolean;
+  onSteamGrid: () => void;
 }) {
   const [preview, setPreview] = useState<string | null>(null);
 
   useEffect(() => {
+    if (value && "url" in value) {
+      setPreview(value.thumb || value.url);
+      return;
+    }
     if (!value || !("file" in value) || !value.file.type.startsWith("image/")) {
       setPreview(null);
       return;
@@ -149,7 +194,7 @@ function FileField({
   }, [value]);
 
   return (
-    <label className="file-field">
+    <div className="file-field">
       <span>
         {label}
         <small>{hint}</small>
@@ -164,7 +209,10 @@ function FileField({
           onChange(file ? { file, name: file.name } : null);
         }}
       />
+      <button type="button" className="ghost" disabled={disabled} onClick={onSteamGrid}>
+        SteamGridDB
+      </button>
       <em>{value ? value.name : `Opcional · ${kind}`}</em>
-    </label>
+    </div>
   );
 }

@@ -1,8 +1,20 @@
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
-import type { GameDetails, GamesCatalog, UploadKind } from "./types";
+import type {
+  GameDetails,
+  GamesCatalog,
+  SteamGridGameMatch,
+  SteamGridImage,
+  SteamGridKind,
+  UploadKind,
+} from "./types";
 
-export type PickedSource = { path: string; name: string } | { file: File; name: string };
+export type PickedSource =
+  | { path: string; name: string }
+  | { file: File; name: string }
+  | { url: string; name: string; thumb?: string };
+
+export type { SteamGridGameMatch, SteamGridImage, SteamGridKind };
 
 export function isTauri(): boolean {
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
@@ -63,7 +75,43 @@ export async function deleteGame(name: string): Promise<void> {
   if (!response.ok) throw new Error(await readError(response));
 }
 
+export async function searchSteamGridGames(query: string): Promise<SteamGridGameMatch[]> {
+  const response = await fetch(`/api/steamgrid/search?q=${encodeURIComponent(query)}`);
+  if (!response.ok) throw new Error(await readError(response));
+  const payload = (await response.json()) as { games: SteamGridGameMatch[] };
+  return payload.games;
+}
+
+export async function listSteamGridImages(
+  id: number,
+  kind: SteamGridKind,
+): Promise<SteamGridImage[]> {
+  const response = await fetch(
+    `/api/steamgrid/images?id=${encodeURIComponent(String(id))}&kind=${encodeURIComponent(kind)}`,
+  );
+  if (!response.ok) throw new Error(await readError(response));
+  const payload = (await response.json()) as { images: SteamGridImage[] };
+  return payload.images;
+}
+
+export async function uploadFromUrl(game: string, kind: SteamGridKind, url: string) {
+  const response = await fetch("/api/upload-from-url", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ game, kind, url }),
+  });
+  if (!response.ok) throw new Error(await readError(response));
+  return response.json() as Promise<{ key: string; url: string }>;
+}
+
 export async function uploadMedia(game: string, kind: UploadKind, source: PickedSource) {
+  if ("url" in source) {
+    if (kind !== "cover" && kind !== "banner" && kind !== "icon") {
+      throw new Error("SteamGridDB só cobre capa, banner e ícone.");
+    }
+    return uploadFromUrl(game, kind, source.url);
+  }
+
   if ("path" in source) {
     return invoke("upload_media", { game, kind, path: source.path });
   }

@@ -12,6 +12,12 @@ import {
   listGames,
   uploadMedia,
 } from "./server/s3.ts";
+import {
+  listSteamGridImages,
+  parseGameId,
+  searchSteamGridGames,
+  uploadFromSteamGrid,
+} from "./server/steamgrid.ts";
 
 const host = process.env.TAURI_DEV_HOST;
 
@@ -92,6 +98,41 @@ function s3ApiPlugin(): Plugin {
             const fileName = url.searchParams.get("name") || "";
             const body = await readBody(req);
             sendJson(res, 200, await uploadMedia({ game, kind, fileName, body }));
+            return;
+          }
+
+          if (req.method === "GET" && url.pathname === "/api/steamgrid/search") {
+            sendJson(res, 200, {
+              games: await searchSteamGridGames(url.searchParams.get("q") || ""),
+            });
+            return;
+          }
+
+          if (req.method === "GET" && url.pathname === "/api/steamgrid/images") {
+            sendJson(res, 200, {
+              images: await listSteamGridImages(
+                parseGameId(url.searchParams.get("id") || ""),
+                url.searchParams.get("kind") || "",
+              ),
+            });
+            return;
+          }
+
+          if (req.method === "POST" && url.pathname === "/api/upload-from-url") {
+            const payload = JSON.parse((await readBody(req)).toString("utf8") || "{}") as {
+              game?: string;
+              kind?: string;
+              url?: string;
+            };
+            sendJson(
+              res,
+              200,
+              await uploadFromSteamGrid({
+                game: payload.game || "",
+                kind: payload.kind || "",
+                url: payload.url || "",
+              }),
+            );
             return;
           }
 

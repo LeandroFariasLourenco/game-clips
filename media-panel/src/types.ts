@@ -1,4 +1,20 @@
 export type UploadKind = "cover" | "banner" | "icon" | "image" | "video";
+export type SteamGridKind = "cover" | "banner" | "icon";
+
+export interface SteamGridGameMatch {
+  id: number;
+  name: string;
+  verified: boolean;
+}
+
+export interface SteamGridImage {
+  id: number;
+  url: string;
+  thumb: string;
+  width: number;
+  height: number;
+  score: number;
+}
 
 export interface GameSummary {
   name: string;

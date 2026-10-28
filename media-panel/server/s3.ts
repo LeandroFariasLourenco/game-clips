@@ -76,7 +76,7 @@ export interface GamesCatalog {
   cachedAt: string | null;
 }
 
-function loadEnv() {
+export function loadEnv() {
   const envPath = join(ROOT, ".env");
   try {
     for (const line of readFileSync(envPath, "utf8").split("\n")) {
@@ -420,6 +420,8 @@ export async function uploadMedia(input: {
   kind: string;
   fileName: string;
   body: Buffer;
+  contentType?: string;
+  skipExtensionCheck?: boolean;
 }): Promise<{ key: string; url: string }> {
   const { client, bucket, publicBaseUrl } = getS3();
   const game = sanitizeGameName(input.game);
@@ -429,15 +431,21 @@ export async function uploadMedia(input: {
   let key: string;
   switch (input.kind) {
     case "cover":
-      if (ext !== ".jpg" && ext !== ".jpeg") throw new Error("A capa deve ser um arquivo .jpg.");
+      if (!input.skipExtensionCheck && ext !== ".jpg" && ext !== ".jpeg") {
+        throw new Error("A capa deve ser um arquivo .jpg.");
+      }
       key = `${game}/${COVER_FILE}`;
       break;
     case "banner":
-      if (ext !== ".jpg" && ext !== ".jpeg") throw new Error("O banner deve ser um arquivo .jpg.");
+      if (!input.skipExtensionCheck && ext !== ".jpg" && ext !== ".jpeg") {
+        throw new Error("O banner deve ser um arquivo .jpg.");
+      }
       key = `${game}/${BANNER_FILE}`;
       break;
     case "icon":
-      if (ext !== ".png") throw new Error("O ícone deve ser um arquivo .png.");
+      if (!input.skipExtensionCheck && ext !== ".png") {
+        throw new Error("O ícone deve ser um arquivo .png.");
+      }
       key = `${game}/${ICON_FILE}`;
       break;
     case "image": {
@@ -459,7 +467,7 @@ export async function uploadMedia(input: {
       Bucket: bucket,
       Key: key,
       Body: input.body,
-      ContentType: mimeOf(input.fileName),
+      ContentType: input.contentType || mimeOf(input.fileName),
     }),
   );
 

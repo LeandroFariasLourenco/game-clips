@@ -20,7 +20,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; img-src 'self' https: data: blob:; media-src https: blob:; connect-src ipc: http://ipc.localhost https:"
+      "csp": "default-src 'self'; img-src 'self' https: data: blob:; media-src https: blob:; connect-src 'self' ipc: http://ipc.localhost http://localhost:1420 http://127.0.0.1:1420 https:"
     }
   },
   "bundle": {
