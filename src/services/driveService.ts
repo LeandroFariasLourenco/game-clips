@@ -1,4 +1,4 @@
-import { Game, GameMedia, MediaType } from '../types/game';
+import { Game, GameMedia } from '../types/game';
 import { parseMasterJsonToGames } from '../utils/storageFormat';
 import {
   GAMES_MANIFEST_FILE,
@@ -134,29 +134,6 @@ class RemoteLibraryService {
 
     const payload = (await res.json()) as { videos?: WorkerListedFile[] };
     return mapListedVideosToMedia(game, payload.videos || []);
-  }
-
-  public async saveMediaFile(game: Game, file: File): Promise<GameMedia> {
-    let type: MediaType = 'screenshot';
-    if (file.type.startsWith('video/') || /\.(mp4|webm|mkv|mov)$/i.test(file.name)) {
-      type = 'video';
-    } else if (/\.(zip|rar|7z|exe|iso)$/i.test(file.name)) {
-      type = 'backup';
-    }
-
-    const localUrl = URL.createObjectURL(file);
-    const newMedia: GameMedia = {
-      id: `local-media-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
-      gameId: game.id,
-      name: file.name,
-      type,
-      mimeType: file.type || 'application/octet-stream',
-      size: file.size,
-      url: localUrl,
-      thumbnailUrl: type === 'screenshot' ? localUrl : undefined,
-      createdTime: new Date().toISOString(),
-    };
-    return newMedia;
   }
 }
 

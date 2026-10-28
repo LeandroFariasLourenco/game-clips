@@ -4,7 +4,6 @@ import { localAssetService } from '../services/driveAssetService';
 import { localLibraryService } from '../services/driveService';
 import { collectGameMediaCacheUrls, warmMediaCache } from '../services/mediaCache';
 import {
-  Plus,
   Play,
   Image as ImageIcon,
   Film,
@@ -16,7 +15,6 @@ import {
   Gamepad2,
 } from 'lucide-react';
 import { MediaViewerModal } from './MediaViewerModal';
-import { UploadMediaModal } from './UploadMediaModal';
 import { MediaPreview } from './MediaPreview';
 
 interface GameDetailsProps {
@@ -28,7 +26,6 @@ export const GameDetails: React.FC<GameDetailsProps> = ({ game }) => {
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'all' | 'screenshot' | 'video' | 'backup'>('all');
   const [selectedMedia, setSelectedMedia] = useState<GameMedia | null>(null);
-  const [uploadModalOpen, setUploadModalOpen] = useState(false);
 
   // Branding assets from the public media bucket
   const [bannerUrl, setBannerUrl] = useState<string | null>(null);
@@ -81,10 +78,6 @@ export const GameDetails: React.FC<GameDetailsProps> = ({ game }) => {
     };
   }, [game.id, game.name, game.subfolderName]);
 
-  const handleMediaUploaded = (newMedia: GameMedia) => {
-    setMediaList((prev) => [newMedia, ...prev]);
-  };
-
   const imagesList = mediaList.filter((m) => m.type === 'screenshot' || m.type === 'artwork');
   const videosList = mediaList.filter((m) => m.type === 'video');
   const backupsList = mediaList.filter((m) => m.type === 'backup');
@@ -99,7 +92,7 @@ export const GameDetails: React.FC<GameDetailsProps> = ({ game }) => {
   const hasVisibleMedia = showImagesSection || showVideosSection || showBackupsSection;
 
   return (
-    <div className="relative min-h-[calc(100vh-4rem)] pb-24 animate-fadeIn">
+    <div className="relative min-h-[calc(100vh-4rem)] pb-12 animate-fadeIn">
       {/* Background banner from the media bucket */}
       <div className="relative w-full h-[280px] sm:h-[380px] lg:h-[420px] overflow-hidden -mx-4 sm:-mx-6 lg:-mx-8 bg-zinc-950">
         {bannerUrl ? (
@@ -169,7 +162,7 @@ export const GameDetails: React.FC<GameDetailsProps> = ({ game }) => {
       </div>
 
       {/* Media Filter Tabs */}
-      <div className="mt-8 flex flex-wrap items-center justify-between gap-4 border-b border-zinc-800/80 pb-4">
+      <div className="mt-8 flex flex-wrap items-center gap-4 border-b border-zinc-800/80 pb-4">
         <div className="flex flex-wrap items-center gap-2">
           <button
             onClick={() => setActiveTab('all')}
@@ -217,14 +210,6 @@ export const GameDetails: React.FC<GameDetailsProps> = ({ game }) => {
             </button>
           )}
         </div>
-
-        <button
-          onClick={() => setUploadModalOpen(true)}
-          className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-semibold shadow-lg shadow-purple-600/20 transition cursor-pointer"
-        >
-          <Plus className="w-4 h-4" />
-          <span>Adicionar Mídia</span>
-        </button>
       </div>
 
       {/* Media Sections (Imagens & Vídeos) or Empty State */}
@@ -243,13 +228,6 @@ export const GameDetails: React.FC<GameDetailsProps> = ({ game }) => {
             <p className="text-xs text-zinc-400 mt-1.5 leading-relaxed">
               Ainda não há screenshots ou clips listados para este jogo no bucket.
             </p>
-            <button
-              onClick={() => setUploadModalOpen(true)}
-              className="mt-4 inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs font-medium border border-zinc-700 transition cursor-pointer"
-            >
-              <Plus className="w-4 h-4 text-purple-400" />
-              <span>Adicionar arquivo</span>
-            </button>
           </div>
         ) : (
           <>
@@ -359,29 +337,11 @@ export const GameDetails: React.FC<GameDetailsProps> = ({ game }) => {
         )}
       </div>
 
-      {/* Floating Action Button (FAB) to Add Media */}
-      <button
-        onClick={() => setUploadModalOpen(true)}
-        className="fixed bottom-6 right-6 z-40 flex items-center gap-2 px-5 py-3 rounded-full bg-purple-600 hover:bg-purple-500 text-white font-semibold text-xs shadow-2xl shadow-purple-600/50 hover:shadow-purple-600/80 transition active:scale-95 cursor-pointer"
-      >
-        <Plus className="w-4 h-4" />
-        <span>Adicionar Mídia</span>
-      </button>
-
       {/* Media Viewer Modal */}
       {selectedMedia && (
         <MediaViewerModal
           media={selectedMedia}
           onClose={() => setSelectedMedia(null)}
-        />
-      )}
-
-      {/* Upload Media Modal */}
-      {uploadModalOpen && (
-        <UploadMediaModal
-          game={game}
-          onClose={() => setUploadModalOpen(false)}
-          onUploaded={handleMediaUploaded}
         />
       )}
     </div>
