@@ -103,7 +103,7 @@ export const GameGrid: React.FC<GameGridProps> = ({
         {visibleGames.map((game) => (
           <Link
             key={game.id}
-            to={gameDetailsPath(game.id)}
+            to={gameDetailsPath(game.name)}
             className="group cursor-pointer flex flex-col transition duration-300 transform-gpu hover:-translate-y-0.5 focus:outline-none"
             aria-label={`Ver mídias de ${game.name}`}
             title={game.name}

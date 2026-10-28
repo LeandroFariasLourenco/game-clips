@@ -9,13 +9,24 @@ import {
   DEFAULT_MEDIA_WORKER_URL,
   GAME_BRANDING_ASSETS,
   buildMediaFileUrl,
+  gameImagesUrl,
+  gameVideosUrl,
   gamesCatalogUrl,
   matchBrandingAsset,
   resolveMediaBaseUrl,
   resolveMediaWorkerUrl,
 } from '../config/mediaConfig';
-import { HOME_CACHE_KEY, gameDetailsCacheKey, resolveRouteCacheKey } from '../libraryContext';
+import { isMediaAssetUrl } from '../services/mediaAssetUrl';
+import { collectGameMediaCacheUrls } from '../services/mediaCache';
+import {
+  HOME_CACHE_KEY,
+  findGameByName,
+  gameDetailsCacheKey,
+  gameDetailsPath,
+  resolveRouteCacheKey,
+} from '../libraryContext';
 import { localAssetService } from '../services/driveAssetService';
+import { mapListedImagesToMedia, mapListedVideosToMedia } from '../services/driveService';
 import {
   FEATURED_COUNT,
   FEATURED_ROTATION_MS,
@@ -215,6 +226,56 @@ test('featured rotation rejects cover, banner, icon and logo assets', () => {
   assert.equal(isRotationValid(invalid, now + 1000), false);
 });
 
+test('media cache accepts library images and videos only', () => {
+  assert.equal(isMediaAssetUrl(`${DEFAULT_MEDIA_WORKER_URL}/FIFA%2015/cover.jpg`), true);
+  assert.equal(isMediaAssetUrl(`${DEFAULT_MEDIA_WORKER_URL}/FIFA%2015/banner.jpg`), true);
+  assert.equal(isMediaAssetUrl(`${DEFAULT_MEDIA_WORKER_URL}/FIFA%2015/icon.png`), true);
+  assert.equal(isMediaAssetUrl(`${DEFAULT_MEDIA_WORKER_URL}/FIFA%2015/images/shot.png`), true);
+  assert.equal(isMediaAssetUrl(`${DEFAULT_MEDIA_WORKER_URL}/FIFA%2015/videos/clip.mp4`), true);
+  assert.equal(
+    isMediaAssetUrl(`${DEFAULT_MEDIA_WORKER_URL}/FIFA%2015/videos/clip/thumb.jpg`),
+    true,
+  );
+  assert.equal(isMediaAssetUrl(`${DEFAULT_MEDIA_BUCKET_URL}/FIFA%2015/cover.jpg`), true);
+  assert.equal(isMediaAssetUrl('http://localhost:3000/__s3/FIFA%2015/cover.jpg'), true);
+  assert.equal(isMediaAssetUrl(DEFAULT_MEDIA_WORKER_URL), false);
+  assert.equal(isMediaAssetUrl(`${DEFAULT_MEDIA_WORKER_URL}/FIFA%2015/meta`), false);
+  assert.equal(isMediaAssetUrl(`${DEFAULT_MEDIA_WORKER_URL}/games.json`), false);
+  assert.equal(isMediaAssetUrl('https://example.com/cover.jpg'), false);
+  assert.equal(isMediaAssetUrl('http://localhost:3000/icon.svg'), false);
+  assert.equal(isMediaAssetUrl('not a url'), false);
+});
+
+test('details media cache collects screenshots and video thumbs', () => {
+  const urls = collectGameMediaCacheUrls([
+    {
+      id: 'image-1',
+      gameId: 'game-1',
+      name: 'shot.png',
+      type: 'screenshot',
+      mimeType: 'image/png',
+      size: 10,
+      url: `${DEFAULT_MEDIA_WORKER_URL}/FIFA%2015/images/shot.png`,
+      thumbnailUrl: `${DEFAULT_MEDIA_WORKER_URL}/FIFA%2015/images/shot.png`,
+    },
+    {
+      id: 'video-1',
+      gameId: 'game-1',
+      name: 'clip.mp4',
+      type: 'video',
+      mimeType: 'video/mp4',
+      size: 20,
+      url: `${DEFAULT_MEDIA_WORKER_URL}/FIFA%2015/videos/clip.mp4`,
+      thumbnailUrl: `${DEFAULT_MEDIA_WORKER_URL}/FIFA%2015/videos/clip/thumb.jpg`,
+    },
+  ]);
+
+  assert.deepEqual(urls, [
+    `${DEFAULT_MEDIA_WORKER_URL}/FIFA%2015/images/shot.png`,
+    `${DEFAULT_MEDIA_WORKER_URL}/FIFA%2015/videos/clip/thumb.jpg`,
+  ]);
+});
+
 test('media URLs always point to the public bucket', () => {
   assert.equal(resolveMediaBaseUrl(), DEFAULT_MEDIA_BUCKET_URL);
   assert.equal(resolveMediaBaseUrl('https://cdn.example.com/media/'), 'https://cdn.example.com/media');
@@ -245,6 +306,51 @@ test('media URLs always point to the public bucket', () => {
     gamesCatalogUrl('https://game-clips-worker.example.workers.dev/'),
     'https://game-clips-worker.example.workers.dev'
   );
+  assert.equal(
+    gameImagesUrl(DEFAULT_MEDIA_WORKER_URL, 'Battlefield 6'),
+    `${DEFAULT_MEDIA_WORKER_URL}/Battlefield%206/images`
+  );
+
+  const battlefield: Game = {
+    id: 'game-battlefield-6',
+    name: 'Battlefield 6',
+    playTimeMinutes: 0,
+    subfolderName: 'Battlefield 6',
+  };
+  const images = mapListedImagesToMedia(battlefield, [
+    {
+      name: 'Battlefield 6 Screenshot 2026.10.18 - 00.49.08.50.png',
+      relativePath: 'images/Battlefield 6 Screenshot 2026.10.18 - 00.49.08.50.png',
+      size: 402321,
+      mimeType: 'image/png',
+      url: `${DEFAULT_MEDIA_WORKER_URL}/Battlefield%206/images/shot.png`,
+    },
+  ]);
+  assert.equal(images.length, 1);
+  assert.equal(images[0].type, 'screenshot');
+  assert.equal(images[0].url, `${DEFAULT_MEDIA_WORKER_URL}/Battlefield%206/images/shot.png`);
+  assert.equal(images[0].thumbnailUrl, images[0].url);
+
+  assert.equal(
+    gameVideosUrl(DEFAULT_MEDIA_WORKER_URL, 'Battlefield 6'),
+    `${DEFAULT_MEDIA_WORKER_URL}/Battlefield%206/videos`
+  );
+  const videos = mapListedVideosToMedia(battlefield, [
+    {
+      name: 'ClipedeMomentsdeOct102026 (5).mp4',
+      relativePath: 'videos/ClipedeMomentsdeOct102026 (5)/ClipedeMomentsdeOct102026 (5).mp4',
+      size: 451293402,
+      mimeType: 'video/mp4',
+      url: `${DEFAULT_MEDIA_WORKER_URL}/Battlefield%206/videos/clip.mp4`,
+      thumbnailUrl: `${DEFAULT_MEDIA_WORKER_URL}/Battlefield%206/videos/ClipedeMomentsdeOct102026%20(5)/thumb.jpg`,
+    },
+  ]);
+  assert.equal(videos.length, 1);
+  assert.equal(videos[0].type, 'video');
+  assert.equal(
+    videos[0].thumbnailUrl,
+    `${DEFAULT_MEDIA_WORKER_URL}/Battlefield%206/videos/ClipedeMomentsdeOct102026%20(5)/thumb.jpg`
+  );
 });
 
 test('route cache keys keep home stable and details keyed by game name', () => {
@@ -264,8 +370,11 @@ test('route cache keys keep home stable and details keyed by game name', () => {
   ];
 
   assert.equal(resolveRouteCacheKey('/', undefined, games), HOME_CACHE_KEY);
-  assert.equal(resolveRouteCacheKey('/game/game-agario', 'game-agario', games), 'Agario');
-  assert.equal(resolveRouteCacheKey('/game/game-fifa-15', 'game-fifa-15', games), 'FIFA 15');
+  assert.equal(gameDetailsPath('Agario'), '/Agario');
+  assert.equal(gameDetailsPath('FIFA 15'), '/FIFA%2015');
+  assert.equal(resolveRouteCacheKey('/Agario', 'Agario', games), 'Agario');
+  assert.equal(resolveRouteCacheKey('/FIFA 15', 'FIFA 15', games), 'FIFA 15');
   assert.equal(gameDetailsCacheKey(games[1]), 'FIFA 15');
-  assert.equal(resolveRouteCacheKey('/game/missing', 'missing', games), null);
+  assert.equal(findGameByName(games, 'FIFA 15')?.name, 'FIFA 15');
+  assert.equal(resolveRouteCacheKey('/missing', 'missing', games), null);
 });

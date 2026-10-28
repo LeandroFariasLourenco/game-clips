@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useMemo, useRef } from 'react';
 import { useLocation, useOutlet, useParams } from 'react-router-dom';
 import { Game } from '../types/game';
-import { resolveRouteCacheKey, useLibrary } from '../libraryContext';
+import { findGameByName, resolveRouteCacheKey, useLibrary } from '../libraryContext';
 
 interface FrozenRoute {
   cacheKey: string;
@@ -16,20 +16,19 @@ export function useFrozenRoute(): FrozenRoute | null {
 
 export function CachedOutlet() {
   const location = useLocation();
-  const params = useParams<{ gameId?: string }>();
+  const params = useParams<{ gameName?: string }>();
   const outlet = useOutlet();
   const { games } = useLibrary();
   const cacheRef = useRef(new Map<string, React.ReactNode>());
 
   const isHome = location.pathname === '/' || location.pathname === '';
-  const isGameRoute = Boolean(params.gameId);
-  const currentGame = useMemo(() => {
-    if (!params.gameId) return null;
-    const decodedId = decodeURIComponent(params.gameId);
-    return games.find((item) => item.id === decodedId) ?? null;
-  }, [games, params.gameId]);
+  const isGameRoute = Boolean(params.gameName);
+  const currentGame = useMemo(
+    () => findGameByName(games, params.gameName) ?? null,
+    [games, params.gameName]
+  );
 
-  const activeKey = resolveRouteCacheKey(location.pathname, params.gameId, games);
+  const activeKey = resolveRouteCacheKey(location.pathname, params.gameName, games);
   const canCache = isHome || Boolean(currentGame);
 
   if (canCache && activeKey && outlet && !cacheRef.current.has(activeKey)) {

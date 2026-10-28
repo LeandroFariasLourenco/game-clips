@@ -19,6 +19,9 @@ const BRANDING = {
   icon: "icon.png",
 };
 
+const VIDEO_THUMB_FILE = "thumb.jpg";
+const VIDEO_EXTENSIONS = new Set([".mp4", ".webm", ".mkv", ".mov", ".avi"]);
+
 const MIME_TYPES = {
   ".json": "application/json; charset=utf-8",
   ".jpg": "image/jpeg",
@@ -74,11 +77,21 @@ async function handle(request, env, allowOrigin) {
     return serveMeta(request, env, allowOrigin, game);
   }
 
-  if (parts[1] === "images" || parts[1] === "videos") {
-    const folder = parts[1];
-    if (parts.length === 2) return serveListing(request, env, allowOrigin, game, folder);
+  if (parts[1] === "images") {
+    if (parts.length === 2) return serveListing(request, env, allowOrigin, game, "images");
     if (parts.length === 3) {
-      return serveObject(request, env, allowOrigin, `${game}/${folder}/${parts[2]}`);
+      return serveObject(request, env, allowOrigin, `${game}/images/${parts[2]}`);
+    }
+  }
+
+  if (parts[1] === "videos") {
+    if (parts.length === 2) return serveVideoListing(request, env, allowOrigin, game);
+    if (parts.length >= 3) {
+      const rest = parts.slice(2);
+      if (rest.some((segment) => segment === ".." || segment === ".")) {
+        return json({ error: "Caminho inválido" }, 400, allowOrigin);
+      }
+      return serveObject(request, env, allowOrigin, `${game}/videos/${rest.join("/")}`);
     }
   }
 
@@ -186,6 +199,108 @@ async function serveListing(request, env, allowOrigin, game, folder) {
   } while (token);
 
   return json({ [folder]: files }, 200, allowOrigin);
+}
+
+async function serveVideoListing(request, env, allowOrigin, game) {
+  const prefix = `${game}/videos/`;
+  const base = `${originBase(request)}/${encodePath(game)}`;
+  const objects = await listAllKeys(env, prefix);
+  const clips = groupVideoClips(objects, prefix, base);
+  return json({ videos: clips }, 200, allowOrigin);
+}
+
+async function listAllKeys(env, prefix) {
+  const objects = [];
+  let token;
+
+  do {
+    const page = await client(env).send(
+      new ListObjectsV2Command({
+        Bucket: env.S3_BUCKET_NAME,
+        Prefix: prefix,
+        ContinuationToken: token,
+      })
+    );
+
+    for (const item of page.Contents || []) {
+      if (!item.Key || item.Key.endsWith("/")) continue;
+      objects.push(item);
+    }
+
+    token = page.IsTruncated ? page.NextContinuationToken : undefined;
+  } while (token);
+
+  return objects;
+}
+
+function groupVideoClips(objects, prefix, publicBase) {
+  const folders = new Map();
+  const looseVideos = [];
+
+  for (const object of objects) {
+    const relative = object.Key.slice(prefix.length);
+    if (!relative) continue;
+    const slash = relative.indexOf("/");
+
+    if (slash < 0) {
+      if (isVideoFile(relative)) looseVideos.push(object);
+      continue;
+    }
+
+    const folder = relative.slice(0, slash);
+    const fileName = relative.slice(slash + 1);
+    if (!folder || !fileName || fileName.includes("/")) continue;
+    if (!folders.has(folder)) folders.set(folder, []);
+    folders.get(folder).push({ fileName, object });
+  }
+
+  const clips = [];
+
+  for (const [folder, files] of folders) {
+    const video = files.find((file) => isVideoFile(file.fileName));
+    if (!video) continue;
+    const thumb = files.find((file) => file.fileName.toLowerCase() === VIDEO_THUMB_FILE);
+    const relativePath = `videos/${folder}/${video.fileName}`;
+    clips.push({
+      ...listedFile(
+        video.fileName,
+        relativePath,
+        video.object.Size,
+        video.object.LastModified,
+        null,
+        `${publicBase}/${encodePath(relativePath)}`
+      ),
+      thumbnailUrl: `${publicBase}/${encodePath(`videos/${folder}/${VIDEO_THUMB_FILE}`)}`,
+      hasThumbnail: Boolean(thumb),
+    });
+  }
+
+  for (const object of looseVideos) {
+    const name = object.Key.slice(prefix.length);
+    const stem = name.replace(/\.[^.]+$/, "");
+    if (folders.has(stem)) continue;
+    const relativePath = `videos/${name}`;
+    clips.push({
+      ...listedFile(
+        name,
+        relativePath,
+        object.Size,
+        object.LastModified,
+        null,
+        `${publicBase}/${encodePath(relativePath)}`
+      ),
+      thumbnailUrl: `${publicBase}/${encodePath(`videos/${stem}/${VIDEO_THUMB_FILE}`)}`,
+      hasThumbnail: false,
+    });
+  }
+
+  return clips;
+}
+
+function isVideoFile(fileName) {
+  const dot = fileName.lastIndexOf(".");
+  if (dot < 0) return false;
+  return VIDEO_EXTENSIONS.has(fileName.slice(dot).toLowerCase());
 }
 
 async function serveObject(request, env, allowOrigin, key, options = {}) {

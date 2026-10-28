@@ -5,6 +5,9 @@ export const DEFAULT_MEDIA_WORKER_URL = 'https://game-clips-worker.feleolive2010
 
 export const GAMES_MANIFEST_FILE = 'games.json';
 export const GAMES_CACHE_NAME = 'game-vault-games';
+export const MEDIA_CACHE_NAME = 'game-vault-media';
+export const CACHE_MEDIA_MESSAGE = 'CACHE_MEDIA';
+export const CLEAR_MEDIA_CACHE_MESSAGE = 'CLEAR_MEDIA_CACHE';
 export const DEV_MEDIA_PROXY_PREFIX = '/__s3';
 
 export type GameBrandingAssetType = 'cover' | 'banner' | 'icon';
@@ -79,6 +82,24 @@ export function getMediaWorkerUrl(): string {
 
 export function getGamesManifestUrl(): string {
   return gamesCatalogUrl(readRuntimeWorkerUrl());
+}
+
+export function gameImagesUrl(workerUrl: string, folderName: string): string {
+  return `${resolveMediaWorkerUrl(workerUrl)}/${encodeMediaPath([folderName, 'images'])}`;
+}
+
+export function getGameImagesUrl(folderName: string): string {
+  return gameImagesUrl(readRuntimeWorkerUrl(), folderName);
+}
+
+export const VIDEO_THUMB_FILE = 'thumb.jpg';
+
+export function gameVideosUrl(workerUrl: string, folderName: string): string {
+  return `${resolveMediaWorkerUrl(workerUrl)}/${encodeMediaPath([folderName, 'videos'])}`;
+}
+
+export function getGameVideosUrl(folderName: string): string {
+  return gameVideosUrl(readRuntimeWorkerUrl(), folderName);
 }
 
 export function getMediaLibraryLabel(): string {

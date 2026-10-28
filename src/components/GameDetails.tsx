@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { Game, GameMedia } from '../types/game';
 import { localAssetService } from '../services/driveAssetService';
+import { localLibraryService } from '../services/driveService';
+import { collectGameMediaCacheUrls, warmMediaCache } from '../services/mediaCache';
 import {
   Plus,
   Play,
@@ -23,7 +25,7 @@ interface GameDetailsProps {
 
 export const GameDetails: React.FC<GameDetailsProps> = ({ game }) => {
   const [mediaList, setMediaList] = useState<GameMedia[]>([]);
-  const loading = false;
+  const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'all' | 'screenshot' | 'video' | 'backup'>('all');
   const [selectedMedia, setSelectedMedia] = useState<GameMedia | null>(null);
   const [uploadModalOpen, setUploadModalOpen] = useState(false);
@@ -41,6 +43,43 @@ export const GameDetails: React.FC<GameDetailsProps> = ({ game }) => {
     setCoverUrl(cover);
     setIconUrl(icon);
   }, [game.id]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadMedia = async () => {
+      setLoading(true);
+      try {
+        const [imagesResult, videosResult] = await Promise.allSettled([
+          localLibraryService.listGameImages(game),
+          localLibraryService.listGameVideos(game),
+        ]);
+        if (imagesResult.status === 'rejected') {
+          console.error('Falha ao listar imagens do jogo:', imagesResult.reason);
+        }
+        if (videosResult.status === 'rejected') {
+          console.error('Falha ao listar vídeos do jogo:', videosResult.reason);
+        }
+        const images = imagesResult.status === 'fulfilled' ? imagesResult.value : [];
+        const videos = videosResult.status === 'fulfilled' ? videosResult.value : [];
+        const listed = [...images, ...videos];
+        if (!cancelled) {
+          setMediaList(listed);
+          void warmMediaCache(collectGameMediaCacheUrls(listed));
+        }
+      } catch (error) {
+        console.error('Falha ao listar mídias do jogo:', error);
+        if (!cancelled) setMediaList([]);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    };
+
+    void loadMedia();
+    return () => {
+      cancelled = true;
+    };
+  }, [game.id, game.name, game.subfolderName]);
 
   const handleMediaUploaded = (newMedia: GameMedia) => {
     setMediaList((prev) => [newMedia, ...prev]);
@@ -270,9 +309,8 @@ export const GameDetails: React.FC<GameDetailsProps> = ({ game }) => {
                       className="group relative aspect-video rounded-xl overflow-hidden bg-zinc-950 border border-zinc-800 hover:border-purple-500/60 cursor-pointer shadow-md hover:shadow-xl hover:shadow-purple-500/10 transition duration-300"
                     >
                       <MediaPreview
-                        kind="video"
-                        src={item.url}
-                        hoverPlay
+                        kind="image"
+                        src={item.thumbnailUrl || ''}
                         className="w-full h-full object-cover brightness-90 group-hover:brightness-100 group-hover:scale-105 transition duration-500"
                       />
 

@@ -16,7 +16,7 @@ const router = createBrowserRouter([
         element: <CachedOutlet />,
         children: [
           { index: true, element: <HomePage /> },
-          { path: 'game/:gameId', element: <GameDetailsPage /> },
+          { path: ':gameName', element: <GameDetailsPage /> },
           { path: '*', element: <Navigate to="/" replace /> },
         ],
       },

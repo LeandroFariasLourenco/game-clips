@@ -26,6 +26,10 @@ export default defineConfig(() => {
       tailwindcss(),
       VitePWA({
         registerType: 'autoUpdate',
+        strategies: 'injectManifest',
+        srcDir: 'src',
+        filename: 'sw.ts',
+        injectRegister: 'inline',
         includeAssets: ['favicon.ico', 'apple-touch-icon.png', 'icon.svg'],
         manifest: {
           id: base,
@@ -58,18 +62,14 @@ export default defineConfig(() => {
             },
           ],
         },
-        workbox: {
+        injectManifest: {
           globPatterns: ['**/*.{js,css,html,ico,png,svg,woff,woff2}'],
-          runtimeCaching: [
-            {
-              urlPattern: /^https:\/\/game-clips-worker\.feleolive2010\.workers\.dev\/?$/i,
-              handler: 'NetworkOnly',
-            },
-          ],
+          rollupFormat: 'iife',
         },
         devOptions: {
           enabled: true,
           type: 'module',
+          navigateFallback: 'index.html',
         },
       }),
     ],

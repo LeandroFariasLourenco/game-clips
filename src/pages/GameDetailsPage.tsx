@@ -2,21 +2,20 @@ import React from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { GameDetails } from '../components/GameDetails';
 import { useFrozenRoute } from '../components/CachedOutlet';
-import { useLibrary } from '../libraryContext';
+import { findGameByName, useLibrary } from '../libraryContext';
 import { Gamepad2 } from 'lucide-react';
 
 export const GameDetailsPage: React.FC = () => {
   const { games, isSyncing } = useLibrary();
   const frozen = useFrozenRoute();
-  const { gameId } = useParams<{ gameId: string }>();
+  const { gameName } = useParams<{ gameName: string }>();
 
-  const decodedId = gameId ? decodeURIComponent(gameId) : '';
   const selectedGame =
     (frozen?.cacheKey
       ? games.find((game) => game.name === frozen.cacheKey)
       : undefined) ??
     frozen?.game ??
-    games.find((game) => game.id === decodedId);
+    findGameByName(games, gameName);
 
   if (isSyncing && !selectedGame) {
     return (

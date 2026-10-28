@@ -21,22 +21,34 @@ export function useLibrary(): LibraryOutletContext {
 
 export const HOME_CACHE_KEY = 'home';
 
-export function gameDetailsPath(gameId: string): string {
-  return `/game/${encodeURIComponent(gameId)}`;
+export function gameDetailsPath(gameName: string): string {
+  return `/${encodeURIComponent(gameName)}`;
 }
 
 export function gameDetailsCacheKey(game: Game): string {
   return game.name;
 }
 
+export function findGameByName(games: Game[], gameName: string | undefined): Game | undefined {
+  if (!gameName) return undefined;
+  const decoded = decodeURIComponent(gameName).trim();
+  if (!decoded) return undefined;
+  const exact =
+    games.find((item) => item.name === decoded) ||
+    games.find((item) => item.subfolderName === decoded);
+  if (exact) return exact;
+  const lower = decoded.toLowerCase();
+  return games.find(
+    (item) => item.name.toLowerCase() === lower || item.subfolderName.toLowerCase() === lower
+  );
+}
+
 export function resolveRouteCacheKey(
   pathname: string,
-  gameId: string | undefined,
+  gameName: string | undefined,
   games: Game[]
 ): string | null {
   if (pathname === '/' || pathname === '') return HOME_CACHE_KEY;
-  if (!gameId) return null;
-  const decodedId = decodeURIComponent(gameId);
-  const game = games.find((item) => item.id === decodedId);
+  const game = findGameByName(games, gameName);
   return game ? gameDetailsCacheKey(game) : null;
 }
