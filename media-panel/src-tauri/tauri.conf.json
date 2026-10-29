@@ -12,11 +12,18 @@
   "app": {
     "windows": [
       {
+        "label": "main",
         "title": "Painel de Mídias",
-        "width": 1280,
-        "height": 800,
-        "minWidth": 960,
-        "minHeight": 640
+        "width": 1024,
+        "height": 768,
+        "minWidth": 1024,
+        "minHeight": 768,
+        "maxWidth": 1024,
+        "maxHeight": 768,
+        "resizable": false,
+        "maximizable": false,
+        "fullscreen": false,
+        "center": true
       }
     ],
     "security": {

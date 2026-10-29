@@ -3,6 +3,8 @@ import { open } from "@tauri-apps/plugin-dialog";
 import type {
   GameDetails,
   GamesCatalog,
+  LocalMediaInventory,
+  LocalSyncStatus,
   SteamGridGameMatch,
   SteamGridImage,
   SteamGridKind,
@@ -144,6 +146,55 @@ const ACCEPT: Record<UploadKind, string> = {
   video: ".mp4,video/mp4",
 };
 
+const DROP_EXTENSIONS: Record<"image" | "video", readonly string[]> = {
+  image: ["jpg", "jpeg", "png"],
+  video: ["mp4"],
+};
+
+const DROP_MIME: Record<"image" | "video", readonly string[]> = {
+  image: ["image/jpeg", "image/jpg", "image/png"],
+  video: ["video/mp4"],
+};
+
+export function fileExtension(name: string): string {
+  const base = name.split(/[\\/]/).pop() || name;
+  const dot = base.lastIndexOf(".");
+  return dot > 0 ? base.slice(dot + 1).toLowerCase() : "";
+}
+
+export function isAcceptedDropFile(kind: "image" | "video", name: string, mime = ""): boolean {
+  const ext = fileExtension(name);
+  if (ext) return DROP_EXTENSIONS[kind].includes(ext);
+  return DROP_MIME[kind].includes(mime.toLowerCase());
+}
+
+export function dropRejectionMessage(kind: "image" | "video"): string {
+  return kind === "image"
+    ? "Esta área aceita apenas imagens .jpg ou .png."
+    : "Esta área aceita apenas vídeos .mp4.";
+}
+
+export function classifyDragItems(
+  kind: "image" | "video",
+  items: DataTransferItemList | undefined,
+): "accept" | "reject" | "unknown" {
+  if (!items) return "unknown";
+  const files = Array.from(items).filter((item) => item.kind === "file");
+  if (files.length === 0) return "reject";
+
+  let sawAllowed = false;
+  let sawBlocked = false;
+  for (const item of files) {
+    const type = item.type.toLowerCase();
+    if (!type || type === "application/octet-stream") continue;
+    if (DROP_MIME[kind].includes(type)) sawAllowed = true;
+    else sawBlocked = true;
+  }
+  if (sawAllowed) return "accept";
+  if (sawBlocked) return "reject";
+  return "unknown";
+}
+
 function pickWithInput(kind: UploadKind): Promise<PickedSource[]> {
   return new Promise((resolve) => {
     const input = document.createElement("input");
@@ -174,8 +225,31 @@ export async function pickFiles(kind: UploadKind): Promise<PickedSource[]> {
   }));
 }
 
+export async function getLocalMedia(): Promise<LocalMediaInventory> {
+  const response = await fetch("/api/local-media");
+  if (!response.ok) throw new Error(await readError(response));
+  return response.json();
+}
+
+export async function getLocalSync(): Promise<LocalSyncStatus> {
+  const response = await fetch("/api/local-media/sync");
+  if (!response.ok) throw new Error(await readError(response));
+  return response.json();
+}
+
+export async function startLocalSync(): Promise<LocalSyncStatus> {
+  const response = await fetch("/api/local-media/sync", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ confirm: "SYNC" }),
+  });
+  if (!response.ok) throw new Error(await readError(response));
+  return response.json();
+}
+
 export function formatBytes(size: number): string {
   if (size < 1024) return `${size} B`;
   if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
-  return `${(size / (1024 * 1024)).toFixed(1)} MB`;
+  if (size < 1024 * 1024 * 1024) return `${(size / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(size / (1024 * 1024 * 1024)).toFixed(2)} GB`;
 }

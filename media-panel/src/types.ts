@@ -47,3 +47,54 @@ export interface GamesCatalog {
   fromCache: boolean;
   cachedAt: string | null;
 }
+
+export interface LocalGameSummary {
+  name: string;
+  hasCover: boolean;
+  hasBanner: boolean;
+  hasIcon: boolean;
+  images: number;
+  videos: number;
+  looseVideos: number;
+  thumbs: number;
+  missingThumbs: number;
+  hasMetadata: boolean;
+  other: number;
+  bytes: number;
+}
+
+export interface LocalMediaInventory {
+  root: string;
+  exists: boolean;
+  hasManifest: boolean;
+  scannedAt: string;
+  destination: { bucket: string; region: string; uri: string } | null;
+  destinationError: string | null;
+  totals: {
+    games: number;
+    files: number;
+    bytes: number;
+    covers: number;
+    banners: number;
+    icons: number;
+    images: number;
+    videos: number;
+    looseVideos: number;
+    thumbs: number;
+    missingThumbs: number;
+    metadata: number;
+    other: number;
+  };
+  otherSamples: string[];
+  games: LocalGameSummary[];
+}
+
+export interface LocalSyncStatus {
+  status: "idle" | "running" | "success" | "error";
+  startedAt: string | null;
+  finishedAt: string | null;
+  exitCode: number | null;
+  error: string | null;
+  command: string | null;
+  log: string[];
+}

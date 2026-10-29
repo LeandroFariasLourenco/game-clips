@@ -2,6 +2,10 @@ pub mod cache;
 pub mod s3;
 
 use std::path::PathBuf;
+use tauri::{LogicalSize, Manager};
+
+const WINDOW_WIDTH: f64 = 1024.0;
+const WINDOW_HEIGHT: f64 = 768.0;
 
 fn load_dotenv() {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
@@ -58,6 +62,10 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        .setup(|app| {
+            lock_main_window(app);
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             list_games,
             get_game,
@@ -67,4 +75,17 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+fn lock_main_window(app: &mut tauri::App) {
+    let Some(window) = app.get_webview_window("main") else {
+        return;
+    };
+
+    let size = LogicalSize::new(WINDOW_WIDTH, WINDOW_HEIGHT);
+    let _ = window.set_resizable(false);
+    let _ = window.set_maximizable(false);
+    let _ = window.set_min_size(Some(size));
+    let _ = window.set_max_size(Some(size));
+    let _ = window.set_size(size);
 }

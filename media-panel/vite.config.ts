@@ -3,6 +3,7 @@ import process from "node:process";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
+import { beginLocalSync, getLocalSyncStatus, scanLocalMedia } from "./server/localMedia.ts";
 import {
   HttpError,
   createGame,
@@ -48,6 +49,28 @@ function s3ApiPlugin(): Plugin {
 
         try {
           const refresh = url.searchParams.get("refresh") === "1";
+
+          if (req.method === "GET" && url.pathname === "/api/local-media") {
+            sendJson(res, 200, await scanLocalMedia());
+            return;
+          }
+
+          if (url.pathname === "/api/local-media/sync") {
+            if (req.method === "GET") {
+              sendJson(res, 200, getLocalSyncStatus());
+              return;
+            }
+            if (req.method === "POST") {
+              const payload = JSON.parse((await readBody(req)).toString("utf8") || "{}") as {
+                confirm?: string;
+              };
+              if (payload.confirm !== "SYNC") {
+                throw new HttpError("Confirme o sync antes de enviar a pasta.", 400);
+              }
+              sendJson(res, 202, beginLocalSync());
+              return;
+            }
+          }
 
           if (req.method === "GET" && url.pathname === "/api/games") {
             sendJson(res, 200, await listGames({ refresh }));
