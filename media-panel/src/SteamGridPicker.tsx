@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { Icon } from "./icons";
 import {
   listSteamGridImages,
   searchSteamGridGames,
@@ -170,8 +171,15 @@ export function SteamGridPicker({
             <p className="eyebrow">SteamGridDB</p>
             <h2>{title}</h2>
           </div>
-          <button type="button" className="ghost" onClick={onClose} disabled={busy}>
-            Fechar
+          <button
+            type="button"
+            className="ghost icon-btn"
+            onClick={onClose}
+            disabled={busy}
+            title="Fechar"
+            aria-label="Fechar"
+          >
+            <Icon name="x" />
           </button>
         </header>
 
@@ -205,6 +213,7 @@ export function SteamGridPicker({
           </label>
           <div className="steamgrid-search-actions">
             <button type="submit" className="ghost" disabled={busy}>
+              <Icon name="search" />
               {searching ? "Buscando…" : "Buscar jogo"}
             </button>
             <button
@@ -213,6 +222,7 @@ export function SteamGridPicker({
               disabled={busy || !gameId}
               onClick={() => void loadImages(gameId)}
             >
+              <Icon name="image" />
               {loadingImages ? "Carregando…" : "Buscar imagens"}
             </button>
           </div>

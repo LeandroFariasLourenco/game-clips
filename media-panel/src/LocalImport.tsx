@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { formatBytes, getLocalMedia, getLocalSync, startLocalSync } from "./api";
+import { Icon } from "./icons";
 import type { LocalMediaInventory, LocalSyncStatus } from "./types";
 
 export function LocalImport({ onImported }: { onImported?: () => void }) {
@@ -106,6 +107,7 @@ export function LocalImport({ onImported }: { onImported?: () => void }) {
           </p>
         </div>
         <button className="ghost" onClick={() => void load()} disabled={loading || running}>
+          <Icon name="refresh" className={loading ? "spin" : undefined} />
           {loading ? "Lendo…" : "Reler pasta"}
         </button>
       </header>
@@ -225,6 +227,7 @@ export function LocalImport({ onImported }: { onImported?: () => void }) {
                 </p>
               </div>
               <button className="danger sync-button" disabled={!canSync} onClick={() => void handleSync()}>
+                <Icon name="cloud" />
                 {running ? "Publicando…" : "Publicar pasta no S3"}
               </button>
             </header>

@@ -95,6 +95,13 @@ pub fn remove_catalog_game(name: &str) {
     let _ = write_catalog(&games);
 }
 
+pub fn forget_asset(key: &str) {
+    if let Some(path) = asset_path(key) {
+        let _ = fs::remove_file(&path);
+        let _ = fs::remove_file(PathBuf::from(format!("{}.missing", path.display())));
+    }
+}
+
 pub fn remove_game_assets(name: &str) {
     invalidate_game(name);
     if let Some(path) = asset_path(name) {

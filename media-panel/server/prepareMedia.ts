@@ -2,21 +2,19 @@ import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { mkdir, readdir, readFile, rename, writeFile } from "node:fs/promises";
 import { basename, extname, join } from "node:path";
+import {
+  IMAGE_EXTENSIONS,
+  METADATA_FILE,
+  VIDEO_EXTENSION,
+  VIDEO_THUMB_FILE,
+  buildGameMetadata,
+  serializeGameMetadata,
+  type GameMetadata,
+} from "./gameMetadata.ts";
 
-const THUMB_FILE = "thumb.jpg";
-export const METADATA_FILE = "metadata.json";
-const IMAGE_EXT = new Set([".jpg", ".jpeg", ".png"]);
-const VIDEO_EXT = ".mp4";
+export { METADATA_FILE, type GameMetadata, type GameMetadataVideo } from "./gameMetadata.ts";
 
-export interface GameMetadataVideo {
-  url: string;
-  thumb: string;
-}
-
-export interface GameMetadata {
-  images: string[];
-  videos: GameMetadataVideo[];
-}
+const THUMB_FILE = VIDEO_THUMB_FILE;
 
 export interface PrepareReport {
   games: number;
@@ -35,19 +33,6 @@ function logLine(log: ((line: string) => void) | undefined, line: string) {
   log?.(line);
 }
 
-function encodePath(segments: string[]): string {
-  return segments
-    .flatMap((segment) => segment.split("/"))
-    .filter(Boolean)
-    .map((segment) => encodeURIComponent(segment))
-    .join("/");
-}
-
-export function mediaFileUrl(publicBaseUrl: string, game: string, relativePath: string): string {
-  const base = publicBaseUrl.replace(/\/+$/, "");
-  return `${base}/${encodePath([game, relativePath])}`;
-}
-
 async function listNames(dir: string): Promise<string[]> {
   if (!existsSync(dir)) return [];
   const entries = await readdir(dir, { withFileTypes: true });
@@ -61,7 +46,7 @@ async function listDirs(dir: string): Promise<string[]> {
 }
 
 function isMp4(fileName: string): boolean {
-  return extname(fileName).toLowerCase() === VIDEO_EXT;
+  return extname(fileName).toLowerCase() === VIDEO_EXTENSION;
 }
 
 function run(command: string, args: string[]): Promise<{ code: number | null; stdout: string; stderr: string }> {
@@ -156,7 +141,7 @@ async function standardizeVideos(videosDir: string): Promise<{ moved: number; re
   for (const fileName of loose) {
     const stem = basename(fileName, extname(fileName));
     const folderPath = join(videosDir, stem);
-    const destination = join(folderPath, `${stem}${VIDEO_EXT}`);
+    const destination = join(folderPath, `${stem}${VIDEO_EXTENSION}`);
     if (existsSync(destination)) {
       throw new Error(`Já existe ${destination}. Remova o duplicado antes do deploy.`);
     }
@@ -168,7 +153,7 @@ async function standardizeVideos(videosDir: string): Promise<{ moved: number; re
   for (const folder of await listDirs(videosDir)) {
     const folderPath = join(videosDir, folder);
     const videos = (await listNames(folderPath)).filter(isMp4);
-    const canonical = `${folder}${VIDEO_EXT}`;
+    const canonical = `${folder}${VIDEO_EXTENSION}`;
     if (videos.length === 1 && videos[0] !== canonical) {
       const destination = join(folderPath, canonical);
       if (existsSync(destination)) {
@@ -202,7 +187,7 @@ async function generateMissingThumbs(
     if (names.some((name) => name.toLowerCase() === THUMB_FILE)) continue;
     const videos = names.filter(isMp4);
     if (videos.length === 0) continue;
-    const canonical = `${folder}${VIDEO_EXT}`;
+    const canonical = `${folder}${VIDEO_EXTENSION}`;
     const fileName = videos.includes(canonical) ? canonical : videos.sort((a, b) => a.localeCompare(b, "pt"))[0];
     pending.push({ folder, fileName });
   }
@@ -221,21 +206,15 @@ async function generateMissingThumbs(
 
 export async function readGameMetadata(game: string, gameDir: string, publicBaseUrl: string): Promise<GameMetadata> {
   const images = (await listNames(join(gameDir, "images")))
-    .filter((name) => IMAGE_EXT.has(extname(name).toLowerCase()))
-    .sort((a, b) => a.localeCompare(b, "pt", { sensitivity: "base" }))
-    .map((name) => mediaFileUrl(publicBaseUrl, game, `images/${name}`));
-
-  const videos = (await clipsIn(join(gameDir, "videos"))).map((clip) => ({
-    url: mediaFileUrl(publicBaseUrl, game, `videos/${clip.folder}/${clip.fileName}`),
-    thumb: mediaFileUrl(publicBaseUrl, game, `videos/${clip.folder}/${THUMB_FILE}`),
-  }));
-
-  return { images, videos };
+    .filter((name) => IMAGE_EXTENSIONS.has(extname(name).toLowerCase()))
+    .sort((a, b) => a.localeCompare(b, "pt", { sensitivity: "base" }));
+  const videos = await clipsIn(join(gameDir, "videos"));
+  return buildGameMetadata(game, publicBaseUrl, { images, videos });
 }
 
 async function writeMetadata(game: string, gameDir: string, publicBaseUrl: string): Promise<boolean> {
   const metadata = await readGameMetadata(game, gameDir, publicBaseUrl);
-  const next = `${JSON.stringify(metadata, null, 2)}\n`;
+  const next = serializeGameMetadata(metadata);
   const target = join(gameDir, METADATA_FILE);
   if (existsSync(target) && (await readFile(target, "utf8")) === next) return false;
   await writeFile(target, next, "utf8");

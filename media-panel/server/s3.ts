@@ -12,6 +12,7 @@ import {
 } from "@aws-sdk/client-s3";
 import {
   coverKey,
+  forgetAsset,
   imageKeysForGame,
   invalidateGame,
   isKnownMissing,
@@ -28,6 +29,18 @@ import {
   writeCatalog,
   writeGameDetails,
 } from "./cache.ts";
+import {
+  buildGameMetadata,
+  isLinkedInMetadata,
+  kindUpdatesGameMetadata,
+  listingFromObjectKeys,
+  metadataMediaPaths,
+  metadataObjectKey,
+  parseGameMetadata,
+  serializeGameMetadata,
+  type GameMetadata,
+  type GameMetadataWriteResult,
+} from "./gameMetadata.ts";
 
 export class HttpError extends Error {
   status: number;
@@ -54,6 +67,7 @@ export interface MediaFile {
   key: string;
   url: string;
   size: number;
+  inMetadata?: boolean;
 }
 
 export interface GameDetails {
@@ -64,6 +78,7 @@ export interface GameDetails {
   hasCover: boolean;
   hasBanner: boolean;
   hasIcon: boolean;
+  hasMetadata?: boolean;
   images: MediaFile[];
   videos: MediaFile[];
   fromCache?: boolean;
@@ -142,6 +157,8 @@ function mimeOf(fileName: string): string {
       return "image/webp";
     case ".mp4":
       return "video/mp4";
+    case ".json":
+      return "application/json; charset=utf-8";
     default:
       return "application/octet-stream";
   }
@@ -317,16 +334,45 @@ function groupVideos(game: string, objects: _Object[]): MediaFile[] {
   return folderVideos.sort((a, b) => a.name.localeCompare(b.name, "pt", { sensitivity: "base" }));
 }
 
+function markLinked(files: MediaFile[], paths: Set<string>): MediaFile[] {
+  return files.map((file) => ({
+    ...file,
+    inMetadata: isLinkedInMetadata(file.key, paths) || isLinkedInMetadata(file.url, paths),
+  }));
+}
+
+function detailsHaveMetadataFlags(details: GameDetails): boolean {
+  return typeof details.hasMetadata === "boolean";
+}
+
+async function readStoredMetadata(game: string): Promise<GameMetadata | null> {
+  const { client, bucket } = getS3();
+  try {
+    const object = await client.send(
+      new GetObjectCommand({ Bucket: bucket, Key: metadataObjectKey(game) }),
+    );
+    const text = await object.Body?.transformToString();
+    return text ? parseGameMetadata(text) : null;
+  } catch (error) {
+    const status = (error as { $metadata?: { httpStatusCode?: number } }).$metadata?.httpStatusCode;
+    const name = (error as { name?: string }).name;
+    if (status === 404 || name === "NotFound" || name === "NoSuchKey") return null;
+    throw error;
+  }
+}
+
 async function getGameFromS3(name: string): Promise<GameDetails> {
   const { publicBaseUrl } = getS3();
   const game = sanitizeGameName(name);
-  const [hasCover, hasBanner, hasIcon, imageObjects, videoObjects] = await Promise.all([
+  const [hasCover, hasBanner, hasIcon, imageObjects, videoObjects, metadata] = await Promise.all([
     objectExists(`${game}/${COVER_FILE}`),
     objectExists(`${game}/${BANNER_FILE}`),
     objectExists(`${game}/${ICON_FILE}`),
     listAll(`${game}/images/`),
     listAll(`${game}/videos/`),
+    readStoredMetadata(game),
   ]);
+  const linked = metadataMediaPaths(metadata);
 
   const images = imageObjects
     .map((object) => {
@@ -350,8 +396,42 @@ async function getGameFromS3(name: string): Promise<GameDetails> {
     hasCover,
     hasBanner,
     hasIcon,
-    images,
-    videos: groupVideos(game, videoObjects),
+    hasMetadata: metadata !== null,
+    images: markLinked(images, linked.images),
+    videos: markLinked(groupVideos(game, videoObjects), linked.videos),
+  };
+}
+
+export async function refreshGameMetadata(name: string): Promise<GameMetadataWriteResult> {
+  const { client, bucket, publicBaseUrl } = getS3();
+  const game = sanitizeGameName(name);
+  const [imageObjects, videoObjects] = await Promise.all([
+    listAll(`${game}/images/`),
+    listAll(`${game}/videos/`),
+  ]);
+  const keys = [...imageObjects, ...videoObjects]
+    .map((object) => object.Key || "")
+    .filter(Boolean);
+  const metadata = buildGameMetadata(game, publicBaseUrl, listingFromObjectKeys(game, keys));
+  const key = metadataObjectKey(game);
+  const body = serializeGameMetadata(metadata);
+
+  await client.send(
+    new PutObjectCommand({
+      Bucket: bucket,
+      Key: key,
+      Body: body,
+      ContentType: "application/json; charset=utf-8",
+      CacheControl: "no-cache",
+    }),
+  );
+  await invalidateGame(game);
+
+  return {
+    key,
+    url: mediaUrl(publicBaseUrl, key),
+    images: metadata.images.length,
+    videos: metadata.videos.length,
   };
 }
 
@@ -359,7 +439,7 @@ export async function getGame(name: string, options?: { refresh?: boolean }): Pr
   const game = sanitizeGameName(name);
   if (!options?.refresh) {
     const cached = await readGameDetails(game);
-    if (cached) {
+    if (cached && detailsHaveMetadataFlags(cached)) {
       void prefetchAssets(imageKeysForGame(cached));
       return { ...cached, fromCache: true };
     }
@@ -474,6 +554,9 @@ export async function uploadMedia(input: {
   if (input.kind !== "video") {
     await writeAsset(key, input.body);
   }
+  if (kindUpdatesGameMetadata(input.kind)) {
+    await refreshGameMetadata(game);
+  }
   await invalidateGame(game);
 
   return { key, url: mediaUrl(publicBaseUrl, key) };
@@ -543,6 +626,7 @@ export async function createGame(name: string): Promise<GameDetails> {
 
   await putFolder(`${game}/images/`);
   await putFolder(`${game}/videos/`);
+  await refreshGameMetadata(game);
 
   const { publicBaseUrl } = getS3();
   const summary = {
@@ -559,12 +643,68 @@ export async function createGame(name: string): Promise<GameDetails> {
     hasCover: false,
     hasBanner: false,
     hasIcon: false,
+    hasMetadata: true,
     images: [],
     videos: [],
     fromCache: false,
   };
   await writeGameDetails(details);
   return details;
+}
+
+export async function deleteMediaFile(name: string, key: string): Promise<{ deleted: string[] }> {
+  const game = sanitizeGameName(name);
+  const keys = await keysForMediaDelete(game, key);
+  if (keys.length === 0) {
+    throw new HttpError("Arquivo não encontrado no bucket.", 404);
+  }
+
+  const { client, bucket } = getS3();
+  for (const objectKey of keys) {
+    await client.send(new DeleteObjectCommand({ Bucket: bucket, Key: objectKey }));
+    await forgetAsset(objectKey);
+  }
+  await refreshGameMetadata(game);
+  await invalidateGame(game);
+  return { deleted: keys };
+}
+
+async function keysForMediaDelete(game: string, key: string): Promise<string[]> {
+  const normalized = key.trim().replace(/^\/+/, "");
+  if (!normalized || normalized.includes("..") || normalized.includes("\\") || normalized.includes("\0")) {
+    throw new HttpError("Chave de mídia inválida.", 400);
+  }
+
+  const imagePrefix = `${game}/images/`;
+  const videoPrefix = `${game}/videos/`;
+
+  if (normalized.startsWith(imagePrefix)) {
+    const relative = normalized.slice(imagePrefix.length);
+    if (!relative || relative.includes("/")) {
+      throw new HttpError("Só é possível remover screenshots em images/.", 400);
+    }
+    return [normalized];
+  }
+
+  if (normalized.startsWith(videoPrefix)) {
+    const relative = normalized.slice(videoPrefix.length);
+    if (!relative) {
+      throw new HttpError("Só é possível remover clips em videos/.", 400);
+    }
+    const slash = relative.indexOf("/");
+    if (slash < 0) {
+      return [normalized];
+    }
+    const folder = relative.slice(0, slash);
+    const rest = relative.slice(slash + 1);
+    if (!folder || !rest || rest.includes("/")) {
+      throw new HttpError("Só é possível remover clips em videos/.", 400);
+    }
+    const folderKeys = await listAllKeys(`${game}/videos/${folder}/`);
+    return folderKeys.length > 0 ? folderKeys : [normalized];
+  }
+
+  throw new HttpError("Só é possível remover screenshots em images/ ou clips em videos/.", 400);
 }
 
 export async function deleteGame(name: string): Promise<void> {
@@ -582,6 +722,7 @@ export async function deleteGame(name: string): Promise<void> {
     `${game}/${COVER_FILE}`,
     `${game}/${BANNER_FILE}`,
     `${game}/${ICON_FILE}`,
+    metadataObjectKey(game),
     `${game}/images/`,
     `${game}/videos/`,
   ]);

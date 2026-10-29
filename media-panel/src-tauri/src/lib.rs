@@ -55,6 +55,20 @@ async fn delete_game(name: String) -> Result<(), String> {
     s3::delete_game(name).await.map_err(|error| error.to_string())
 }
 
+#[tauri::command]
+async fn delete_media(name: String, key: String) -> Result<(), String> {
+    s3::delete_media(name, key)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn refresh_game_metadata(name: String) -> Result<s3::MetadataResult, String> {
+    s3::refresh_game_metadata(name)
+        .await
+        .map_err(|error| error.to_string())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     load_dotenv();
@@ -71,7 +85,9 @@ pub fn run() {
             get_game,
             upload_media,
             create_game,
-            delete_game
+            delete_game,
+            delete_media,
+            refresh_game_metadata
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

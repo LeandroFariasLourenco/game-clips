@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent as ReactDragEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ComponentProps, type DragEvent as ReactDragEvent, type ReactNode } from "react";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import {
   assetUrl,
@@ -6,6 +6,7 @@ import {
   coverAssetKey,
   createGame,
   deleteGame,
+  deleteMediaFile,
   dropRejectionMessage,
   formatBytes,
   getGame,
@@ -13,10 +14,12 @@ import {
   isTauri,
   listGames,
   pickFiles,
+  refreshGameMetadata,
   uploadMedia,
   type PickedSource,
 } from "./api";
 import { CreateGameModal } from "./CreateGameModal";
+import { Icon } from "./icons";
 import { LocalImport } from "./LocalImport";
 import { SteamGridPicker } from "./SteamGridPicker";
 import type { GameDetails, GameSummary, SteamGridKind, UploadKind } from "./types";
@@ -24,6 +27,9 @@ import "./App.css";
 
 type DropKind = "image" | "video";
 type DropMode = "accept" | "reject";
+type PendingDelete =
+  | { type: "game"; name: string }
+  | { type: "file"; kind: DropKind; game: string; name: string; key: string };
 
 function App() {
   const [games, setGames] = useState<GameSummary[]>([]);
@@ -40,9 +46,12 @@ function App() {
   const [creating, setCreating] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
   const [removing, setRemoving] = useState(false);
+  const [pendingDelete, setPendingDelete] = useState<PendingDelete | null>(null);
+  const [updatingMetadata, setUpdatingMetadata] = useState(false);
   const [steamGridKind, setSteamGridKind] = useState<SteamGridKind | null>(null);
   const [showLocal, setShowLocal] = useState(false);
   const [nativeDrop, setNativeDrop] = useState<{ kind: DropKind; mode: DropMode } | null>(null);
+  const gameListRef = useRef<HTMLUListElement>(null);
   const selectedRef = useRef<string | null>(null);
   const uploadLock = useRef(false);
   const handleDroppedRef = useRef<(kind: DropKind, sources: PickedSource[]) => Promise<void>>(
@@ -102,6 +111,33 @@ function App() {
     if (!needle) return games;
     return games.filter((game) => game.name.toLowerCase().includes(needle));
   }, [games, query]);
+  const selectedIndex = filtered.findIndex((game) => game.name === selectedName);
+
+  function selectAt(index: number) {
+    const next = filtered[index];
+    if (!next) return;
+    setShowLocal(false);
+    setSelectedName(next.name);
+  }
+
+  function selectAdjacent(step: -1 | 1) {
+    selectAt(selectedIndex + step);
+  }
+
+  useEffect(() => {
+    if (!selectedName) return;
+    const list = gameListRef.current;
+    const active = list?.querySelector<HTMLElement>(".game-item.active");
+    if (!list || !active) return;
+    const listRect = list.getBoundingClientRect();
+    const itemRect = active.getBoundingClientRect();
+    const inView = itemRect.top >= listRect.top && itemRect.bottom <= listRect.bottom;
+    if (inView) return;
+    const nextTop =
+      list.scrollTop + (itemRect.top - listRect.top) - listRect.height / 2 + itemRect.height / 2;
+    const maxTop = Math.max(0, list.scrollHeight - list.clientHeight);
+    list.scrollTo({ top: Math.min(maxTop, Math.max(0, nextTop)), behavior: "smooth" });
+  }, [selectedName, filtered]);
 
   async function sendUploads(kind: UploadKind, sources: PickedSource[], skipped = 0) {
     if (!selectedName || sources.length === 0 || uploadLock.current) return;
@@ -262,22 +298,35 @@ function App() {
     }
   }
 
-  async function handleRemove() {
-    if (!selectedName || !canRemove) return;
-    const confirmed = window.confirm(
-      `Remover a pasta "${selectedName}" do bucket? Só é permitido se não houver screenshots nem clips.`,
-    );
-    if (!confirmed) return;
+  function requestRemoveGame() {
+    if (!selectedName || !canRemove || removing) return;
+    setPendingDelete({ type: "game", name: selectedName });
+  }
+
+  function requestRemoveFile(kind: DropKind, file: { name: string; key: string }) {
+    if (!selectedName || removing) return;
+    setPendingDelete({ type: "file", kind, game: selectedName, name: file.name, key: file.key });
+  }
+
+  async function confirmPendingDelete() {
+    if (!pendingDelete || removing) return;
     setRemoving(true);
     setError(null);
     setNotice(null);
     try {
-      await deleteGame(selectedName);
-      const removed = selectedName;
-      setSelectedName(null);
-      setDetails(null);
-      await loadList(false);
-      setNotice(`Jogo "${removed}" removido do bucket.`);
+      if (pendingDelete.type === "game") {
+        await deleteGame(pendingDelete.name);
+        setSelectedName(null);
+        setDetails(null);
+        await loadList(false);
+        setNotice(`Jogo "${pendingDelete.name}" removido do bucket.`);
+      } else {
+        await deleteMediaFile(pendingDelete.game, pendingDelete.key);
+        await loadDetails(pendingDelete.game, true);
+        const label = pendingDelete.kind === "image" ? "Screenshot" : "Clip";
+        setNotice(`${label} "${pendingDelete.name}" removido. metadata.json atualizado.`);
+      }
+      setPendingDelete(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -285,36 +334,62 @@ function App() {
     }
   }
 
+  async function handleRefreshMetadata() {
+    if (!selectedName || updatingMetadata) return;
+    setUpdatingMetadata(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const result = await refreshGameMetadata(selectedName);
+      await loadDetails(selectedName, true);
+      setNotice(
+        `metadata.json atualizado em ${selectedName}: ${result.images} imagem(ns) e ${result.videos} vídeo(s).`,
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setUpdatingMetadata(false);
+    }
+  }
+
   return (
     <div className="shell">
       <aside className="sidebar">
         <header className="sidebar-header">
-          <div>
-            <p className="eyebrow">Game Vault</p>
-            <h1>Painel de mídias</h1>
-          </div>
           <div className="header-actions">
-            <button className="ghost" onClick={() => void loadList(true)} disabled={loadingList}>
-              {loadingList ? "Atualizando…" : "Atualizar"}
+            <button
+              className="ghost icon-btn"
+              onClick={() => void loadList(true)}
+              disabled={loadingList}
+              title="Atualizar catálogo"
+              aria-label="Atualizar catálogo"
+            >
+              <Icon name="refresh" className={loadingList ? "spin" : undefined} />
             </button>
             <button
-              className={showLocal ? "ghost active" : "ghost"}
+              className={showLocal ? "ghost icon-btn active" : "ghost icon-btn"}
               onClick={() => setShowLocal((open) => !open)}
+              title="Pasta local"
+              aria-label="Pasta local"
             >
-              Pasta local
+              <Icon name="folder" />
             </button>
             <button className="primary" onClick={() => setShowCreate(true)} disabled={creating}>
-              Novo jogo
+              <Icon name="plus" />
+              Novo
             </button>
           </div>
         </header>
 
-        <input
-          className="search"
-          value={query}
-          onChange={(event) => setQuery(event.target.value)}
-          placeholder="Buscar jogo"
-        />
+        <label className="search-field">
+          <Icon name="search" />
+          <input
+            className="search"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="Buscar jogo"
+          />
+        </label>
 
         <p className="count">
           {loadingList
@@ -326,28 +401,79 @@ function App() {
               }`}
         </p>
         {cachedAt && !loadingList && (
-          <p className="count">
-            {fromCache ? "Consultas de imagem evitadas." : "Cache gravado agora."}{" "}
+          <p className="count cache-stamp">
+            {fromCache ? "Cache local" : "Cache gravado"} ·{" "}
             {new Date(cachedAt).toLocaleString("pt-BR")}
           </p>
         )}
 
-        <ul className="game-list">
-          {filtered.map((game) => (
-            <li key={game.name}>
-              <button
-                className={game.name === selectedName ? "game-item active" : "game-item"}
-                onClick={() => {
-                  setShowLocal(false);
-                  setSelectedName(game.name);
-                }}
-              >
-                <CoverThumb src={assetUrl(coverAssetKey(game.name), game.coverUrl)} alt="" />
-                <span>{game.name}</span>
-              </button>
-            </li>
-          ))}
+        <ul className="game-list" ref={gameListRef}>
+          {filtered.map((game) => {
+            const active = game.name === selectedName;
+            return (
+              <li key={game.name}>
+                <button
+                  type="button"
+                  className={active ? "game-item active" : "game-item"}
+                  aria-current={active ? "true" : undefined}
+                  onClick={() => {
+                    setShowLocal(false);
+                    setSelectedName(game.name);
+                  }}
+                >
+                  <CoverThumb src={assetUrl(coverAssetKey(game.name), game.coverUrl)} alt="" />
+                  <span>{game.name}</span>
+                </button>
+              </li>
+            );
+          })}
         </ul>
+
+        <nav className="list-nav" aria-label="Navegação da lista de jogos">
+          <button
+            type="button"
+            className="ghost icon-btn"
+            disabled={filtered.length === 0 || selectedIndex === 0}
+            title="Primeira página"
+            aria-label="Primeira página"
+            onClick={() => selectAt(0)}
+          >
+            <Icon name="chevrons-left" />
+          </button>
+          <button
+            type="button"
+            className="ghost icon-btn"
+            disabled={selectedIndex <= 0}
+            title="Jogo anterior"
+            aria-label="Jogo anterior"
+            onClick={() => selectAdjacent(-1)}
+          >
+            <Icon name="chevron-left" />
+          </button>
+          <span>
+            {selectedIndex >= 0 ? selectedIndex + 1 : 0} / {filtered.length}
+          </span>
+          <button
+            type="button"
+            className="ghost icon-btn"
+            disabled={selectedIndex < 0 || selectedIndex >= filtered.length - 1}
+            title="Próximo jogo"
+            aria-label="Próximo jogo"
+            onClick={() => selectAdjacent(1)}
+          >
+            <Icon name="chevron-right" />
+          </button>
+          <button
+            type="button"
+            className="ghost icon-btn"
+            disabled={filtered.length === 0 || selectedIndex === filtered.length - 1}
+            title="Última página"
+            aria-label="Última página"
+            onClick={() => selectAt(filtered.length - 1)}
+          >
+            <Icon name="chevrons-right" />
+          </button>
+        </nav>
       </aside>
 
       <main className="main">
@@ -360,84 +486,91 @@ function App() {
 
         {!showLocal && selectedName && (
           <>
-            <section className="hero">
-              <CoverThumb
-                className="hero-cover"
-                src={assetUrl(
-                  coverAssetKey(selectedName),
-                  details?.coverUrl ??
-                    games.find((game) => game.name === selectedName)?.coverUrl ??
-                    "",
-                )}
-                alt={selectedName}
-              />
-              <div>
-                <p className="eyebrow">Pasta do bucket</p>
+            <div className="details-toolbar">
+              <div className="details-game">
                 <h2>{selectedName}</h2>
-                <p className="muted">
-                  Branding canônico: cover.jpg, banner.jpg e icon.png. Screenshots em images/ e
-                  clips em videos/&lt;nome&gt;/&lt;nome&gt;.mp4.
-                </p>
-                <button
-                  className="danger"
-                  disabled={!canRemove || removing || loadingDetails}
-                  title={
-                    canRemove
-                      ? "Remove a pasta se não houver images/ nem videos/"
-                      : "Remova screenshots e clips antes de excluir o jogo."
-                  }
-                  onClick={() => void handleRemove()}
-                >
-                  {removing ? "Removendo…" : "Remover jogo"}
-                </button>
+                {details && details.name === selectedName && (
+                  <GameMetadataBadge present={details.hasMetadata === true} />
+                )}
               </div>
-            </section>
+              <button
+                className="ghost"
+                disabled={updatingMetadata || loadingDetails || uploading !== null}
+                title="Regera metadata.json a partir das imagens e clips atuais no bucket."
+                onClick={() => void handleRefreshMetadata()}
+              >
+                <Icon name="file" className={updatingMetadata ? "spin" : undefined} />
+                {updatingMetadata ? "Atualizando…" : "Metadata"}
+              </button>
+              <button
+                className="danger"
+                disabled={!canRemove || removing || loadingDetails}
+                title={
+                  canRemove
+                    ? "Remove a pasta se não houver images/ nem videos/"
+                    : "Remova screenshots e clips antes de excluir o jogo."
+                }
+                onClick={requestRemoveGame}
+              >
+                <Icon name="trash" />
+                {removing ? "Removendo…" : "Remover"}
+              </button>
+            </div>
 
             {loadingDetails && <p className="muted">Carregando mídias…</p>}
 
             {details && (
               <>
-                <section className="cards">
-                  <AssetCard
-                    variant="cover"
-                    title="Capa"
-                    fileName="cover.jpg"
-                    present={details.hasCover}
-                    src={assetUrl(`${details.name}/cover.jpg`, details.coverUrl)}
-                    busy={uploading === "cover"}
-                    onUpload={() => void handleUpload("cover")}
-                    onSteamGrid={() => setSteamGridKind("cover")}
-                  />
-                  <AssetCard
-                    variant="banner"
-                    title="Banner"
-                    fileName="banner.jpg"
-                    present={details.hasBanner}
-                    src={assetUrl(`${details.name}/banner.jpg`, details.bannerUrl)}
-                    busy={uploading === "banner"}
-                    onUpload={() => void handleUpload("banner")}
-                    onSteamGrid={() => setSteamGridKind("banner")}
-                  />
-                  <AssetCard
-                    variant="icon"
-                    title="Ícone"
-                    fileName="icon.png"
-                    present={details.hasIcon}
-                    src={assetUrl(`${details.name}/icon.png`, details.iconUrl)}
-                    busy={uploading === "icon"}
-                    onUpload={() => void handleUpload("icon")}
-                    onSteamGrid={() => setSteamGridKind("icon")}
-                  />
-                </section>
+                <BrandingAccordion
+                  key={`${selectedName}-branding`}
+                  coverPresent={details.hasCover}
+                  bannerPresent={details.hasBanner}
+                  iconPresent={details.hasIcon}
+                >
+                  <section className="cards">
+                    <AssetCard
+                      variant="cover"
+                      title="Capa"
+                      fileName="cover.jpg"
+                      present={details.hasCover}
+                      src={assetUrl(`${details.name}/cover.jpg`, details.coverUrl)}
+                      busy={uploading === "cover"}
+                      onUpload={() => void handleUpload("cover")}
+                      onSteamGrid={() => setSteamGridKind("cover")}
+                    />
+                    <AssetCard
+                      variant="banner"
+                      title="Banner"
+                      fileName="banner.jpg"
+                      present={details.hasBanner}
+                      src={assetUrl(`${details.name}/banner.jpg`, details.bannerUrl)}
+                      busy={uploading === "banner"}
+                      onUpload={() => void handleUpload("banner")}
+                      onSteamGrid={() => setSteamGridKind("banner")}
+                    />
+                    <AssetCard
+                      variant="icon"
+                      title="Ícone"
+                      fileName="icon.png"
+                      present={details.hasIcon}
+                      src={assetUrl(`${details.name}/icon.png`, details.iconUrl)}
+                      busy={uploading === "icon"}
+                      onUpload={() => void handleUpload("icon")}
+                      onSteamGrid={() => setSteamGridKind("icon")}
+                    />
+                  </section>
+                </BrandingAccordion>
 
+                <div className="details-media">
                 <MediaDropSection
+                  key={`${selectedName}-image`}
                   kind="image"
-                  title="Screenshots"
-                  countLabel={`${details.images.length} arquivo(s) em images/`}
+                  title="Imagens"
+                  countLabel={metadataCountLabel("arquivo(s) em images/", details.images)}
                   hint="Arraste imagens .jpg ou .png para esta área."
-                  busy={uploading !== null}
+                  busy={uploading !== null || removing}
                   nativeMode={nativeDrop?.kind === "image" ? nativeDrop.mode : null}
-                  actionLabel={uploading === "image" ? "Enviando…" : "Enviar imagens"}
+                  sending={uploading === "image"}
                   onBrowse={() => void handleUpload("image")}
                   onDropFiles={(files) =>
                     void handleDropped(
@@ -449,28 +582,33 @@ function App() {
                   {details.images.length === 0 ? (
                     <p className="muted">Nenhuma screenshot neste jogo.</p>
                   ) : (
-                    <div className="thumbs">
+                    <ul className="files files-images">
                       {details.images.map((file) => (
-                        <figure key={file.key}>
-                          <img src={assetUrl(file.key, file.url)} alt={file.name} />
-                          <figcaption>
-                            {file.name}
-                            <span>{formatBytes(file.size)}</span>
-                          </figcaption>
-                        </figure>
+                        <li key={file.key} className={fileMetaRowClass(file.inMetadata, details.hasMetadata)}>
+                          <CoverThumb src={assetUrl(file.key, file.url)} alt="" className="file-thumb" />
+                          <strong title={file.name}>{file.name}</strong>
+                          <MetadataLink linked={file.inMetadata} hasMetadata={details.hasMetadata} />
+                          <span>{formatBytes(file.size)}</span>
+                          <FileDeleteButton
+                            disabled={removing || uploading !== null}
+                            label={`Remover screenshot ${file.name}`}
+                            onClick={() => requestRemoveFile("image", file)}
+                          />
+                        </li>
                       ))}
-                    </div>
+                    </ul>
                   )}
                 </MediaDropSection>
 
                 <MediaDropSection
+                  key={`${selectedName}-video`}
                   kind="video"
-                  title="Clips"
-                  countLabel={`${details.videos.length} vídeo(s) em videos/`}
+                  title="Vídeos"
+                  countLabel={metadataCountLabel("vídeo(s) em videos/", details.videos)}
                   hint="Arraste vídeos .mp4 para esta área."
-                  busy={uploading !== null}
+                  busy={uploading !== null || removing}
                   nativeMode={nativeDrop?.kind === "video" ? nativeDrop.mode : null}
-                  actionLabel={uploading === "video" ? "Enviando…" : "Enviar vídeos"}
+                  sending={uploading === "video"}
                   onBrowse={() => void handleUpload("video")}
                   onDropFiles={(files) =>
                     void handleDropped(
@@ -482,17 +620,23 @@ function App() {
                   {details.videos.length === 0 ? (
                     <p className="muted">Nenhum clip neste jogo.</p>
                   ) : (
-                    <ul className="files">
+                    <ul className="files files-videos">
                       {details.videos.map((file) => (
-                        <li key={file.key}>
-                          <strong>{file.name}</strong>
-                          <span>{file.key}</span>
+                        <li key={file.key} className={fileMetaRowClass(file.inMetadata, details.hasMetadata)}>
+                          <strong title={file.key}>{file.name}</strong>
+                          <MetadataLink linked={file.inMetadata} hasMetadata={details.hasMetadata} />
                           <span>{formatBytes(file.size)}</span>
+                          <FileDeleteButton
+                            disabled={removing || uploading !== null}
+                            label={`Remover clip ${file.name}`}
+                            onClick={() => requestRemoveFile("video", file)}
+                          />
                         </li>
                       ))}
                     </ul>
                   )}
                 </MediaDropSection>
+                </div>
               </>
             )}
           </>
@@ -509,6 +653,40 @@ function App() {
         />
       )}
 
+      {pendingDelete && (
+        <ConfirmDialog
+          busy={removing}
+          title={pendingDelete.type === "game" ? "Remover jogo" : pendingDelete.kind === "image" ? "Remover screenshot" : "Remover clip"}
+          confirmLabel={removing ? "Removendo…" : pendingDelete.type === "game" ? "Remover pasta" : "Remover arquivo"}
+          onCancel={() => {
+            if (!removing) setPendingDelete(null);
+          }}
+          onConfirm={() => void confirmPendingDelete()}
+        >
+          {pendingDelete.type === "game" ? (
+            <>
+              <p>
+                A pasta <strong>{pendingDelete.name}</strong> será apagada do bucket, incluindo capa,
+                banner, ícone e metadata.json.
+              </p>
+              <p className="muted">Essa ação não pode ser desfeita.</p>
+            </>
+          ) : (
+            <>
+              <p>
+                O {pendingDelete.kind === "image" ? "arquivo" : "clip"}{" "}
+                <strong>{pendingDelete.name}</strong> será apagado de{" "}
+                <strong>{pendingDelete.game}</strong>
+                {pendingDelete.kind === "video" ? ", junto com a pasta e o thumb.jpg se existirem" : ""}.
+              </p>
+              <p className="muted">
+                O metadata.json será atualizado depois da exclusão. Essa ação não pode ser desfeita.
+              </p>
+            </>
+          )}
+        </ConfirmDialog>
+      )}
+
       {steamGridKind && selectedName && (
         <SteamGridPicker
           gameName={selectedName}
@@ -521,6 +699,100 @@ function App() {
           }}
         />
       )}
+    </div>
+  );
+}
+
+function FileDeleteButton({
+  disabled,
+  label,
+  onClick,
+}: {
+  disabled: boolean;
+  label: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      className="ghost icon-btn file-delete"
+      disabled={disabled}
+      title={label}
+      aria-label={label}
+      onClick={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        onClick();
+      }}
+    >
+      <Icon name="trash" size={14} />
+    </button>
+  );
+}
+
+function ConfirmDialog({
+  title,
+  confirmLabel,
+  busy,
+  onCancel,
+  onConfirm,
+  children,
+}: {
+  title: string;
+  confirmLabel: string;
+  busy: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+  children: ReactNode;
+}) {
+  useEffect(() => {
+    function onKey(event: KeyboardEvent) {
+      if (event.key === "Escape" && !busy) onCancel();
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [busy, onCancel]);
+
+  return (
+    <div
+      className="modal-backdrop"
+      role="presentation"
+      onClick={busy ? undefined : onCancel}
+    >
+      <div
+        className="modal confirm-modal"
+        role="alertdialog"
+        aria-modal="true"
+        aria-labelledby="confirm-title"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <header>
+          <div>
+            <p className="eyebrow">Confirmação</p>
+            <h2 id="confirm-title">{title}</h2>
+          </div>
+          <button
+            type="button"
+            className="ghost icon-btn"
+            onClick={onCancel}
+            disabled={busy}
+            title="Cancelar"
+            aria-label="Cancelar"
+          >
+            <Icon name="x" />
+          </button>
+        </header>
+        <div className="confirm-body">{children}</div>
+        <footer>
+          <button type="button" className="ghost" autoFocus disabled={busy} onClick={onCancel}>
+            Cancelar
+          </button>
+          <button type="button" className="danger" disabled={busy} onClick={onConfirm}>
+            <Icon name="trash" />
+            {confirmLabel}
+          </button>
+        </footer>
+      </div>
     </div>
   );
 }
@@ -573,6 +845,113 @@ function dropKindAt(position: { x: number; y: number }): DropKind | null {
   return kind === "image" || kind === "video" ? kind : null;
 }
 
+function AccordionShell({
+  open,
+  onToggle,
+  trigger,
+  actions,
+  overlay,
+  children,
+  className,
+  ...rest
+}: {
+  open: boolean;
+  onToggle: () => void;
+  trigger: ReactNode;
+  actions?: ReactNode;
+  overlay?: ReactNode;
+  children: ReactNode;
+  className?: string;
+} & Omit<ComponentProps<"section">, "children" | "className">) {
+  return (
+    <section
+      className={["media-accordion", open ? "is-open" : "", className].filter(Boolean).join(" ")}
+      {...rest}
+    >
+      {overlay}
+      <div className="media-accordion-head">
+        <button
+          type="button"
+          className="media-accordion-trigger"
+          aria-expanded={open}
+          onClick={onToggle}
+        >
+          {trigger}
+          <span className="media-accordion-chevron" aria-hidden="true">
+            <Icon name="chevron-down" />
+          </span>
+        </button>
+        {actions}
+      </div>
+      <div className="media-accordion-panel" aria-hidden={!open}>
+        <div className="media-accordion-inner" {...(!open ? { inert: true } : {})}>
+          {children}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function metadataCountLabel(unit: string, files: { inMetadata?: boolean }[]) {
+  return `${files.length} ${unit}`;
+}
+
+function fileMetaStatus(linked?: boolean, hasMetadata?: boolean): "linked" | "orphan" | "none" {
+  if (hasMetadata === false) return "none";
+  return linked ? "linked" : "orphan";
+}
+
+function fileMetaRowClass(linked?: boolean, hasMetadata?: boolean) {
+  return `file-row file-row-${fileMetaStatus(linked, hasMetadata)}`;
+}
+
+function MetadataLink({ linked, hasMetadata }: { linked?: boolean; hasMetadata?: boolean }) {
+  const status = fileMetaStatus(linked, hasMetadata);
+  if (status === "none") {
+    return (
+      <span
+        className="meta-flag meta-flag-icon meta-flag-none"
+        title="Este jogo não tem metadata.json no bucket"
+        aria-label="Sem metadata.json"
+      >
+        <Icon name="file" size={12} />
+      </span>
+    );
+  }
+  if (status === "linked") {
+    return (
+      <span
+        className="meta-flag meta-flag-icon meta-flag-ok"
+        title="Presente em metadata.json"
+        aria-label="Presente em metadata.json"
+      >
+        <Icon name="check" size={12} />
+      </span>
+    );
+  }
+  return (
+    <span
+      className="meta-flag meta-flag-icon meta-flag-off"
+      title="Arquivo no bucket, mas ausente de metadata.json"
+      aria-label="Ausente de metadata.json"
+    >
+      <Icon name="x" size={12} />
+    </span>
+  );
+}
+
+function GameMetadataBadge({ present }: { present: boolean }) {
+  return (
+    <span
+      className={`game-meta ${present ? "game-meta-ok" : "game-meta-off"}`}
+      title={present ? "Este jogo tem metadata.json no bucket" : "Este jogo não tem metadata.json no bucket"}
+    >
+      <Icon name={present ? "check" : "file"} size={14} />
+      {present ? "metadata.json" : "Sem metadata.json"}
+    </span>
+  );
+}
+
 function MediaDropSection({
   kind,
   title,
@@ -580,7 +959,7 @@ function MediaDropSection({
   hint,
   busy,
   nativeMode,
-  actionLabel,
+  sending,
   onBrowse,
   onDropFiles,
   children,
@@ -591,11 +970,12 @@ function MediaDropSection({
   hint: string;
   busy: boolean;
   nativeMode: DropMode | null;
-  actionLabel: string;
+  sending: boolean;
   onBrowse: () => void;
   onDropFiles: (files: File[]) => void;
-  children: ReactNode;
+  children?: ReactNode;
 }) {
+  const [open, setOpen] = useState(false);
   const [htmlMode, setHtmlMode] = useState<DropMode | null>(null);
   const depth = useRef(0);
   const mode = nativeMode ?? htmlMode;
@@ -615,8 +995,10 @@ function MediaDropSection({
   }
 
   return (
-    <section
-      className={mode ? `panel dropzone dropzone-${mode}` : "panel dropzone"}
+    <AccordionShell
+      open={open}
+      onToggle={() => setOpen((value) => !value)}
+      className={mode ? `dropzone dropzone-${mode}` : "dropzone"}
       data-drop-kind={kind}
       data-drop-mode={mode ?? "idle"}
       onDragEnter={(event) => {
@@ -640,24 +1022,68 @@ function MediaDropSection({
         const files = Array.from(event.dataTransfer.files);
         if (files.length > 0) onDropFiles(files);
       }}
-    >
-      <header>
-        <div>
+      trigger={
+        <span>
           <h3>{title}</h3>
           <p className="muted">{countLabel}</p>
           <p className="drop-hint">{hint}</p>
-        </div>
-        <button className="primary" disabled={busy} onClick={onBrowse}>
-          {actionLabel}
+        </span>
+      }
+      actions={
+        <button
+          type="button"
+          className="primary icon-btn"
+          disabled={busy}
+          onClick={onBrowse}
+          title={kind === "image" ? "Enviar imagens" : "Enviar vídeos"}
+          aria-label={kind === "image" ? "Enviar imagens" : "Enviar vídeos"}
+        >
+          <Icon name="upload" className={sending ? "spin" : undefined} />
         </button>
-      </header>
-      {mode && (
-        <div className={`dropzone-overlay ${mode}`} aria-hidden="true">
-          {mode === "accept" ? acceptLabel : rejectLabel}
-        </div>
-      )}
+      }
+      overlay={
+        mode ? (
+          <div className={`dropzone-overlay ${mode}`} aria-hidden="true">
+            {mode === "accept" ? acceptLabel : rejectLabel}
+          </div>
+        ) : null
+      }
+    >
       {children}
-    </section>
+    </AccordionShell>
+  );
+}
+
+function BrandingAccordion({
+  coverPresent,
+  bannerPresent,
+  iconPresent,
+  children,
+}: {
+  coverPresent: boolean;
+  bannerPresent: boolean;
+  iconPresent: boolean;
+  children: ReactNode;
+}) {
+  const [open, setOpen] = useState(false);
+  const presentCount = Number(coverPresent) + Number(bannerPresent) + Number(iconPresent);
+
+  return (
+    <AccordionShell
+      open={open}
+      onToggle={() => setOpen((value) => !value)}
+      trigger={
+        <span>
+          <p className="eyebrow">Branding</p>
+          <h3>Capa, banner e ícone</h3>
+          <p className="muted">
+            {presentCount}/3 no bucket · cover.jpg, banner.jpg, icon.png
+          </p>
+        </span>
+      }
+    >
+      {children}
+    </AccordionShell>
   );
 }
 
@@ -693,9 +1119,11 @@ function AssetCard({
         <p className={present ? "ok" : "missing"}>{present ? "Presente no bucket" : "Ausente"}</p>
         <div className="asset-actions">
           <button className="primary" disabled={busy} onClick={onUpload}>
+            <Icon name="upload" />
             {busy ? "Enviando…" : present ? "Substituir" : "Enviar"}
           </button>
           <button className="ghost" disabled={busy} onClick={onSteamGrid}>
+            <Icon name="grid" />
             SteamGridDB
           </button>
         </div>

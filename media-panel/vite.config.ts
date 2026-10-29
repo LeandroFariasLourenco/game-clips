@@ -8,9 +8,11 @@ import {
   HttpError,
   createGame,
   deleteGame,
+  deleteMediaFile,
   getAsset,
   getGame,
   listGames,
+  refreshGameMetadata,
   uploadMedia,
 } from "./server/s3.ts";
 import {
@@ -74,6 +76,22 @@ function s3ApiPlugin(): Plugin {
 
           if (req.method === "GET" && url.pathname === "/api/games") {
             sendJson(res, 200, await listGames({ refresh }));
+            return;
+          }
+
+          const metadataMatch = url.pathname.match(/^\/api\/games\/([^/]+)\/metadata$/);
+          if (req.method === "POST" && metadataMatch) {
+            sendJson(res, 200, await refreshGameMetadata(decodeURIComponent(metadataMatch[1])));
+            return;
+          }
+
+          const fileMatch = url.pathname.match(/^\/api\/games\/([^/]+)\/file$/);
+          if (req.method === "DELETE" && fileMatch) {
+            sendJson(
+              res,
+              200,
+              await deleteMediaFile(decodeURIComponent(fileMatch[1]), url.searchParams.get("key") || ""),
+            );
             return;
           }
 

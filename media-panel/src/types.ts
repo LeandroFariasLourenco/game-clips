@@ -26,6 +26,14 @@ export interface MediaFile {
   key: string;
   url: string;
   size: number;
+  inMetadata?: boolean;
+}
+
+export interface GameMetadataResult {
+  key: string;
+  url: string;
+  images: number;
+  videos: number;
 }
 
 export interface GameDetails {
@@ -36,6 +44,7 @@ export interface GameDetails {
   hasCover: boolean;
   hasBanner: boolean;
   hasIcon: boolean;
+  hasMetadata?: boolean;
   images: MediaFile[];
   videos: MediaFile[];
   fromCache?: boolean;

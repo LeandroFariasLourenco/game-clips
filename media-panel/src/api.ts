@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import type {
   GameDetails,
+  GameMetadataResult,
   GamesCatalog,
   LocalMediaInventory,
   LocalSyncStatus,
@@ -68,12 +69,33 @@ export async function createGame(name: string): Promise<GameDetails> {
   return response.json();
 }
 
+export async function refreshGameMetadata(name: string): Promise<GameMetadataResult> {
+  if (isTauri()) return invoke("refresh_game_metadata", { name });
+  const response = await fetch(`/api/games/${encodeURIComponent(name)}/metadata`, {
+    method: "POST",
+  });
+  if (!response.ok) throw new Error(await readError(response));
+  return response.json();
+}
+
 export async function deleteGame(name: string): Promise<void> {
   if (isTauri()) {
     await invoke("delete_game", { name });
     return;
   }
   const response = await fetch(`/api/games/${encodeURIComponent(name)}`, { method: "DELETE" });
+  if (!response.ok) throw new Error(await readError(response));
+}
+
+export async function deleteMediaFile(name: string, key: string): Promise<void> {
+  if (isTauri()) {
+    await invoke("delete_media", { name, key });
+    return;
+  }
+  const response = await fetch(
+    `/api/games/${encodeURIComponent(name)}/file?key=${encodeURIComponent(key)}`,
+    { method: "DELETE" },
+  );
   if (!response.ok) throw new Error(await readError(response));
 }
 

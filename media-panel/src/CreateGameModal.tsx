@@ -1,5 +1,6 @@
 import { useEffect, useState, type FormEvent } from "react";
 import type { PickedSource } from "./api";
+import { Icon } from "./icons";
 import { SteamGridPicker } from "./SteamGridPicker";
 import type { SteamGridKind, UploadKind } from "./types";
 
@@ -54,8 +55,15 @@ export function CreateGameModal({ busy, onClose, onSubmit }: CreateGameModalProp
             <p className="eyebrow">Novo jogo</p>
             <h2>Cadastrar pasta no bucket</h2>
           </div>
-          <button type="button" className="ghost" onClick={onClose} disabled={busy}>
-            Fechar
+          <button
+            type="button"
+            className="ghost icon-btn"
+            onClick={onClose}
+            disabled={busy}
+            title="Fechar"
+            aria-label="Fechar"
+          >
+            <Icon name="x" />
           </button>
         </header>
 
@@ -137,6 +145,7 @@ export function CreateGameModal({ busy, onClose, onSubmit }: CreateGameModalProp
             Cancelar
           </button>
           <button type="submit" className="primary" disabled={busy || !name.trim()}>
+            <Icon name="plus" />
             {busy ? "Criando…" : "Criar jogo"}
           </button>
         </footer>
@@ -210,6 +219,7 @@ function FileField({
         }}
       />
       <button type="button" className="ghost" disabled={disabled} onClick={onSteamGrid}>
+        <Icon name="grid" />
         SteamGridDB
       </button>
       <em>{value ? value.name : `Opcional · ${kind}`}</em>
