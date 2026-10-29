@@ -26,7 +26,7 @@ jobs:
       - run: npm ci
       - run: npm run build
         env:
-          VITE_BASE_PATH: /game-vault/
+          VITE_BASE_PATH: /game-clips/
       - name: SPA fallback
         run: cp dist/index.html dist/404.html
       - uses: actions/configure-pages@v5
