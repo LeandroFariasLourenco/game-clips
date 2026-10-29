@@ -29,12 +29,72 @@ function parseArgs(argv) {
   return options;
 }
 
+const STANDARDIZED_STEM = /^\d{14}-.+/;
+
 function isVideoFile(fileName) {
   return VIDEO_EXTENSIONS.has(path.extname(fileName).toLowerCase());
 }
 
 function isImageFile(fileName) {
   return IMAGE_EXTENSIONS.has(path.extname(fileName).toLowerCase());
+}
+
+function pad2(value) {
+  return String(value).padStart(2, '0');
+}
+
+function formatLocalTimestamp(date) {
+  return (
+    `${date.getFullYear()}${pad2(date.getMonth() + 1)}${pad2(date.getDate())}` +
+    `${pad2(date.getHours())}${pad2(date.getMinutes())}${pad2(date.getSeconds())}`
+  );
+}
+
+function isStandardizedFileName(fileName) {
+  return STANDARDIZED_STEM.test(path.parse(fileName).name);
+}
+
+function uniqueFileName(dirPath, fileName, sourcePath) {
+  const parsed = path.parse(fileName);
+  let candidate = fileName;
+  let suffix = 2;
+  while (true) {
+    const fullPath = path.join(dirPath, candidate);
+    if (!fs.existsSync(fullPath) || path.resolve(fullPath) === path.resolve(sourcePath)) {
+      return candidate;
+    }
+    candidate = `${parsed.name}-${suffix}${parsed.ext}`;
+    suffix += 1;
+  }
+}
+
+function standardFileName(filePath, fileName) {
+  if (isStandardizedFileName(fileName)) return fileName;
+  const parsed = path.parse(fileName);
+  const stamp = formatLocalTimestamp(fs.statSync(filePath).mtime);
+  return `${stamp}-${parsed.name}${parsed.ext}`;
+}
+
+function renameToStandard(filePath, dryRun) {
+  const dirPath = path.dirname(filePath);
+  const fileName = path.basename(filePath);
+  const nextName = uniqueFileName(dirPath, standardFileName(filePath, fileName), filePath);
+  if (nextName === fileName) return { renamed: false, fileName };
+  if (!dryRun) fs.renameSync(filePath, path.join(dirPath, nextName));
+  return { renamed: true, fileName: nextName, from: fileName };
+}
+
+function uniqueDirName(parentDir, dirName, sourcePath) {
+  let candidate = dirName;
+  let suffix = 2;
+  while (true) {
+    const fullPath = path.join(parentDir, candidate);
+    if (!fs.existsSync(fullPath) || path.resolve(fullPath) === path.resolve(sourcePath)) {
+      return candidate;
+    }
+    candidate = `${dirName}-${suffix}`;
+    suffix += 1;
+  }
 }
 
 function hasThumbnail(entries, force) {
@@ -83,6 +143,7 @@ function seekTimeFor(duration) {
 }
 
 function extractThumbnail(videoPath, outputPath) {
+  ensureFfmpeg();
   const seek = seekTimeFor(probeDurationSeconds(videoPath)).toFixed(3);
   const args = [
     '-hide_banner',
@@ -133,6 +194,76 @@ function moveLooseVideo(videosDir, fileName, dryRun) {
   }
 
   return { folderPath, moved: true };
+}
+
+function standardizeGameFileNames(gameName, gameDir, options, stats) {
+  const imagesDir = path.join(gameDir, 'images');
+  if (fs.existsSync(imagesDir) && fs.statSync(imagesDir).isDirectory()) {
+    for (const entry of listDir(imagesDir)) {
+      if (!entry.isFile() || !isImageFile(entry.name)) continue;
+      const relative = `${gameName}/images/${entry.name}`;
+      try {
+        const result = renameToStandard(path.join(imagesDir, entry.name), options.dryRun);
+        if (result.renamed) {
+          stats.renamed += 1;
+          console.log(`  → nome: ${relative} → ${result.fileName}`);
+        }
+      } catch (error) {
+        stats.failed += 1;
+        stats.failures.push(`${relative}: ${error.message}`);
+        console.error(`  ✖ falha ao padronizar ${relative}: ${error.message}`);
+      }
+    }
+  }
+
+  const videosDir = path.join(gameDir, 'videos');
+  if (!fs.existsSync(videosDir) || !fs.statSync(videosDir).isDirectory()) return;
+
+  for (const entry of listDir(videosDir)) {
+    if (!entry.isFile() || !isVideoFile(entry.name)) continue;
+    const relative = `${gameName}/videos/${entry.name}`;
+    try {
+      const result = renameToStandard(path.join(videosDir, entry.name), options.dryRun);
+      if (result.renamed) {
+        stats.renamed += 1;
+        console.log(`  → nome: ${relative} → ${result.fileName}`);
+      }
+    } catch (error) {
+      stats.failed += 1;
+      stats.failures.push(`${relative}: ${error.message}`);
+      console.error(`  ✖ falha ao padronizar ${relative}: ${error.message}`);
+    }
+  }
+
+  for (const folder of listDir(videosDir).filter((entry) => entry.isDirectory())) {
+    const folderPath = path.join(videosDir, folder.name);
+    const relativeFolder = `${gameName}/videos/${folder.name}`;
+    try {
+      const videoEntries = listDir(folderPath).filter((entry) => entry.isFile() && isVideoFile(entry.name));
+      const videoNamesAfter = [];
+      for (const video of videoEntries) {
+        const relative = `${relativeFolder}/${video.name}`;
+        const result = renameToStandard(path.join(folderPath, video.name), options.dryRun);
+        videoNamesAfter.push(result.fileName);
+        if (result.renamed) {
+          stats.renamed += 1;
+          console.log(`  → nome: ${relative} → ${result.fileName}`);
+        }
+      }
+
+      if (videoNamesAfter.length !== 1) continue;
+
+      const nextFolderName = uniqueDirName(videosDir, path.parse(videoNamesAfter[0]).name, folderPath);
+      if (nextFolderName === folder.name) continue;
+      if (!options.dryRun) fs.renameSync(folderPath, path.join(videosDir, nextFolderName));
+      stats.renamedFolders += 1;
+      console.log(`  → pasta: ${relativeFolder} → ${nextFolderName}`);
+    } catch (error) {
+      stats.failed += 1;
+      stats.failures.push(`${relativeFolder}: ${error.message}`);
+      console.error(`  ✖ falha ao padronizar ${relativeFolder}: ${error.message}`);
+    }
+  }
 }
 
 function processGameVideos(gameName, videosDir, options, stats) {
@@ -220,7 +351,9 @@ function printSummary(stats, options) {
   console.log('\n========== Sumário ==========');
   console.log(`Pasta de mídia:        ${options.root}`);
   console.log(`Modo:                  ${options.dryRun ? 'dry-run' : 'gravação'}`);
-  console.log(`Jogos com videos/:     ${stats.games}`);
+  console.log(`Jogos processados:     ${stats.games}`);
+  console.log(`Arquivos renomeados:   ${stats.renamed}`);
+  console.log(`Pastas de clip:        ${stats.renamedFolders}`);
   console.log(`Vídeos soltos movidos: ${stats.moved}`);
   console.log(`Pastas de vídeo:       ${stats.videos}`);
   console.log(`Thumbs já existentes:  ${stats.existing}`);
@@ -239,6 +372,8 @@ function main() {
   const options = parseArgs(process.argv.slice(2));
   const stats = {
     games: 0,
+    renamed: 0,
+    renamedFolders: 0,
     moved: 0,
     videos: 0,
     existing: 0,
@@ -253,20 +388,23 @@ function main() {
     process.exit(1);
   }
 
-  ensureFfmpeg();
-
-  console.log(`Gerando thumbnails em: ${options.root}`);
+  console.log(`Padronizando nomes e gerando thumbnails em: ${options.root}`);
   if (options.dryRun) console.log('Dry-run: nenhum arquivo será movido ou gravado.\n');
   else console.log('');
 
   const gameFolders = listDir(options.root).filter((entry) => entry.isDirectory());
 
   for (const game of gameFolders) {
-    const videosDir = path.join(options.root, game.name, 'videos');
-    if (!fs.existsSync(videosDir) || !fs.statSync(videosDir).isDirectory()) continue;
+    const gameDir = path.join(options.root, game.name);
+    const imagesDir = path.join(gameDir, 'images');
+    const videosDir = path.join(gameDir, 'videos');
+    const hasImages = fs.existsSync(imagesDir) && fs.statSync(imagesDir).isDirectory();
+    const hasVideos = fs.existsSync(videosDir) && fs.statSync(videosDir).isDirectory();
+    if (!hasImages && !hasVideos) continue;
 
     stats.games += 1;
-    processGameVideos(game.name, videosDir, options, stats);
+    standardizeGameFileNames(game.name, gameDir, options, stats);
+    if (hasVideos) processGameVideos(game.name, videosDir, options, stats);
   }
 
   printSummary(stats, options);

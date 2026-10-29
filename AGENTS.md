@@ -17,7 +17,7 @@ Cada jogo tem uma pasta com o mesmo nome (caracteres inválidos de filesystem re
   icon.png       # ícone
   images/        # screenshots: .jpg (renomear .jpeg → .jpg); .png permitido na galeria
   videos/        # clips: cada .mp4 solto vira <nome-do-clip>/<nome-do-clip>.mp4 + thumb.jpg
-                 # (scripts/generate-video-thumbnails.cjs)
+                 # nomes: YYYYMMDDHHmmss-nomeoriginal.ext (mtime local; generate-video-thumbnails.cjs)
 ```
 
 Constantes em `src/config/mediaConfig.ts` (`GAME_BRANDING_ASSETS`, `DEFAULT_MEDIA_BUCKET_URL`).

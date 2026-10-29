@@ -2,6 +2,7 @@ pub mod cache;
 pub mod s3;
 
 use std::path::PathBuf;
+use std::time::UNIX_EPOCH;
 use tauri::{LogicalSize, Manager};
 
 const WINDOW_WIDTH: f64 = 1024.0;
@@ -39,10 +40,32 @@ async fn get_game(name: String, refresh: Option<bool>) -> Result<s3::GameDetails
 }
 
 #[tauri::command]
-async fn upload_media(game: String, kind: String, path: String) -> Result<s3::UploadResult, String> {
-    s3::upload_media(game, kind, path)
+async fn upload_media(
+    game: String,
+    kind: String,
+    path: String,
+    file_name: Option<String>,
+) -> Result<s3::UploadResult, String> {
+    s3::upload_media(game, kind, path, file_name)
         .await
         .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn file_mtimes(paths: Vec<String>) -> Result<Vec<i64>, String> {
+    paths
+        .into_iter()
+        .map(|path| {
+            let modified = std::fs::metadata(&path)
+                .and_then(|meta| meta.modified())
+                .map_err(|error| format!("Não foi possível ler a data de {path}: {error}"))?;
+            Ok(modified
+                .duration_since(UNIX_EPOCH)
+                .or_else(|_| UNIX_EPOCH.duration_since(modified))
+                .unwrap_or_default()
+                .as_millis() as i64)
+        })
+        .collect()
 }
 
 #[tauri::command]
@@ -58,6 +81,13 @@ async fn delete_game(name: String) -> Result<(), String> {
 #[tauri::command]
 async fn delete_media(name: String, key: String) -> Result<(), String> {
     s3::delete_media(name, key)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn get_game_metadata(name: String) -> Result<Option<s3::GameMetadata>, String> {
+    s3::get_game_metadata(name)
         .await
         .map_err(|error| error.to_string())
 }
@@ -84,9 +114,11 @@ pub fn run() {
             list_games,
             get_game,
             upload_media,
+            file_mtimes,
             create_game,
             delete_game,
             delete_media,
+            get_game_metadata,
             refresh_game_metadata
         ])
         .run(tauri::generate_context!())

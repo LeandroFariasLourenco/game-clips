@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import type {
   GameDetails,
+  GameMetadata,
   GameMetadataResult,
   GamesCatalog,
   LocalMediaInventory,
@@ -13,7 +14,7 @@ import type {
 } from "./types";
 
 export type PickedSource =
-  | { path: string; name: string }
+  | { path: string; name: string; lastModified?: number }
   | { file: File; name: string }
   | { url: string; name: string; thumb?: string };
 
@@ -65,6 +66,13 @@ export async function createGame(name: string): Promise<GameDetails> {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ name }),
   });
+  if (!response.ok) throw new Error(await readError(response));
+  return response.json();
+}
+
+export async function getGameMetadata(name: string): Promise<GameMetadata | null> {
+  if (isTauri()) return invoke("get_game_metadata", { name });
+  const response = await fetch(`/api/games/${encodeURIComponent(name)}/metadata`);
   if (!response.ok) throw new Error(await readError(response));
   return response.json();
 }
@@ -137,7 +145,7 @@ export async function uploadMedia(game: string, kind: UploadKind, source: Picked
   }
 
   if ("path" in source) {
-    return invoke("upload_media", { game, kind, path: source.path });
+    return invoke("upload_media", { game, kind, path: source.path, fileName: source.name });
   }
 
   const response = await fetch(
@@ -227,6 +235,7 @@ function pickWithInput(kind: UploadKind): Promise<PickedSource[]> {
       const files = [...(input.files || [])].map((file) => ({ file, name: file.name }));
       resolve(files);
     };
+    input.oncancel = () => resolve([]);
     input.click();
   });
 }
@@ -241,10 +250,36 @@ export async function pickFiles(kind: UploadKind): Promise<PickedSource[]> {
   });
   if (!selected) return [];
   const paths = Array.isArray(selected) ? selected : [selected];
-  return paths.map((path) => ({
-    path,
-    name: path.split(/[\\/]/).pop() || path,
-  }));
+  return withFileMtimes(
+    paths.map((path) => ({
+      path,
+      name: path.split(/[\\/]/).pop() || path,
+    })),
+  );
+}
+
+export function sourceLastModified(source: PickedSource): number {
+  if ("file" in source) return source.file.lastModified;
+  if ("path" in source) return source.lastModified ?? Date.now();
+  return Date.now();
+}
+
+export async function withFileMtimes(sources: PickedSource[]): Promise<PickedSource[]> {
+  const pathIndexes: number[] = [];
+  const paths: string[] = [];
+  sources.forEach((source, index) => {
+    if ("path" in source) {
+      pathIndexes.push(index);
+      paths.push(source.path);
+    }
+  });
+  if (paths.length === 0) return sources;
+  const times = await invoke<number[]>("file_mtimes", { paths });
+  return sources.map((source, index) => {
+    const timeIndex = pathIndexes.indexOf(index);
+    if (timeIndex < 0 || !("path" in source)) return source;
+    return { ...source, lastModified: times[timeIndex] };
+  });
 }
 
 export async function getLocalMedia(): Promise<LocalMediaInventory> {
@@ -267,6 +302,19 @@ export async function startLocalSync(): Promise<LocalSyncStatus> {
   });
   if (!response.ok) throw new Error(await readError(response));
   return response.json();
+}
+
+export function formatFileDate(value?: string): string {
+  if (!value) return "—";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "—";
+  return date.toLocaleString("pt-BR", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }
 
 export function formatBytes(size: number): string {

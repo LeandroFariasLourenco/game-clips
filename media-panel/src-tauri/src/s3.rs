@@ -50,6 +50,10 @@ pub struct MediaFile {
     pub url: String,
     pub size: i64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inserted_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub modified_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub in_metadata: Option<bool>,
 }
 
@@ -97,19 +101,19 @@ pub struct MetadataResult {
     pub videos: usize,
 }
 
-#[derive(Serialize, Deserialize)]
-struct GameMetadataVideo {
-    url: String,
+#[derive(Clone, Serialize, Deserialize)]
+pub struct GameMetadataVideo {
+    pub url: String,
     #[serde(default)]
-    thumb: String,
+    pub thumb: String,
 }
 
-#[derive(Serialize, Deserialize)]
-struct GameMetadata {
+#[derive(Clone, Serialize, Deserialize)]
+pub struct GameMetadata {
     #[serde(default)]
-    images: Vec<String>,
+    pub images: Vec<String>,
     #[serde(default)]
-    videos: Vec<GameMetadataVideo>,
+    pub videos: Vec<GameMetadataVideo>,
 }
 
 fn required_env(name: &str) -> Result<String, Error> {
@@ -184,7 +188,7 @@ fn file_stem(path: &Path) -> Result<String, Error> {
         .ok_or_else(|| Error::Message("Não foi possível ler o nome do arquivo.".into()))
 }
 
-fn file_name(path: &Path) -> Result<String, Error> {
+fn path_file_name(path: &Path) -> Result<String, Error> {
     path.file_name()
         .and_then(|value| value.to_str())
         .map(ToOwned::to_owned)
@@ -272,7 +276,19 @@ async fn object_exists(settings: &Settings, key: &str) -> Result<bool, Error> {
     }
 }
 
-async fn list_keys(settings: &Settings, prefix: &str) -> Result<Vec<(String, i64)>, Error> {
+fn object_timestamp(time: Option<&aws_smithy_types::DateTime>) -> Option<String> {
+    time.and_then(|value| value.fmt(aws_smithy_types::date_time::Format::DateTime).ok())
+}
+
+fn details_have_file_dates(details: &GameDetails) -> bool {
+    details
+        .images
+        .iter()
+        .chain(details.videos.iter())
+        .all(|file| file.modified_at.is_some())
+}
+
+async fn list_keys(settings: &Settings, prefix: &str) -> Result<Vec<(String, i64, Option<String>)>, Error> {
     let mut objects = Vec::new();
     let mut token: Option<String> = None;
 
@@ -296,7 +312,11 @@ async fn list_keys(settings: &Settings, prefix: &str) -> Result<Vec<(String, i64
             if key.ends_with('/') {
                 continue;
             }
-            objects.push((key.to_string(), object.size().unwrap_or(0)));
+            objects.push((
+                key.to_string(),
+                object.size().unwrap_or(0),
+                object_timestamp(object.last_modified()),
+            ));
         }
 
         if page.is_truncated() == Some(true) {
@@ -500,6 +520,12 @@ fn build_game_metadata(
     }
 }
 
+pub async fn get_game_metadata(name: String) -> Result<Option<GameMetadata>, Error> {
+    let game = sanitize_game_name(&name)?;
+    let settings = build_client()?;
+    read_stored_metadata(&settings, &game).await
+}
+
 pub async fn refresh_game_metadata(name: String) -> Result<MetadataResult, Error> {
     let game = sanitize_game_name(&name)?;
     let settings = build_client()?;
@@ -509,8 +535,8 @@ pub async fn refresh_game_metadata(name: String) -> Result<MetadataResult, Error
     )?;
     let keys: Vec<String> = image_objects
         .into_iter()
-        .map(|(key, _)| key)
-        .chain(video_objects.into_iter().map(|(key, _)| key))
+        .map(|(key, _, _)| key)
+        .chain(video_objects.into_iter().map(|(key, _, _)| key))
         .collect();
     let (images, videos) = listing_from_object_keys(&game, &keys);
     let metadata = build_game_metadata(&game, &settings.public_base_url, &images, &videos);
@@ -542,12 +568,12 @@ pub async fn refresh_game_metadata(name: String) -> Result<MetadataResult, Error
     })
 }
 
-fn group_videos(settings: &Settings, game: &str, objects: &[(String, i64)]) -> Vec<MediaFile> {
+fn group_videos(settings: &Settings, game: &str, objects: &[(String, i64, Option<String>)]) -> Vec<MediaFile> {
     let prefix = format!("{game}/videos/");
     let mut folder_videos = Vec::new();
     let mut loose = Vec::new();
 
-    for (key, size) in objects {
+    for (key, size, modified_at) in objects {
         let Some(relative) = key.strip_prefix(&prefix) else {
             continue;
         };
@@ -557,7 +583,7 @@ fn group_videos(settings: &Settings, game: &str, objects: &[(String, i64)]) -> V
         match relative.split_once('/') {
             None => {
                 if is_video_file(relative) {
-                    loose.push((relative.to_string(), key.clone(), *size));
+                    loose.push((relative.to_string(), key.clone(), *size, modified_at.clone()));
                 }
             }
             Some((folder, file_name)) => {
@@ -565,7 +591,7 @@ fn group_videos(settings: &Settings, game: &str, objects: &[(String, i64)]) -> V
                     continue;
                 }
                 if is_video_file(file_name) {
-                    folder_videos.push((folder.to_string(), key.clone(), *size));
+                    folder_videos.push((folder.to_string(), key.clone(), *size, modified_at.clone()));
                 }
             }
         }
@@ -574,18 +600,20 @@ fn group_videos(settings: &Settings, game: &str, objects: &[(String, i64)]) -> V
     let mut videos = Vec::new();
     let mut used_folders = Vec::new();
 
-    for (folder, key, size) in folder_videos {
+    for (folder, key, size, modified_at) in folder_videos {
         used_folders.push(folder.clone());
         videos.push(MediaFile {
             name: folder,
             url: media_url(settings, &key),
             key,
             size,
+            inserted_at: modified_at.clone(),
+            modified_at,
             in_metadata: None,
         });
     }
 
-    for (name, key, size) in loose {
+    for (name, key, size, modified_at) in loose {
         let stem = Path::new(&name)
             .file_stem()
             .and_then(|value| value.to_str())
@@ -598,6 +626,8 @@ fn group_videos(settings: &Settings, game: &str, objects: &[(String, i64)]) -> V
             url: media_url(settings, &key),
             key,
             size,
+            inserted_at: modified_at.clone(),
+            modified_at,
             in_metadata: None,
         });
     }
@@ -689,7 +719,7 @@ pub async fn get_game(name: String, refresh: bool) -> Result<GameDetails, Error>
     let game = sanitize_game_name(&name)?;
     if !refresh {
         if let Some(mut details) = cache::read_game(&game) {
-            if details.has_metadata.is_some() {
+            if details.has_metadata.is_some() && details_have_file_dates(&details) {
                 details.from_cache = true;
                 return Ok(details);
             }
@@ -713,7 +743,7 @@ pub async fn get_game(name: String, refresh: bool) -> Result<GameDetails, Error>
 
     let mut images: Vec<MediaFile> = image_objects
         .into_iter()
-        .filter_map(|(key, size)| {
+        .filter_map(|(key, size, modified_at)| {
             let name = key.rsplit('/').next()?.to_string();
             if name.is_empty() || name.contains('/') {
                 return None;
@@ -723,6 +753,8 @@ pub async fn get_game(name: String, refresh: bool) -> Result<GameDetails, Error>
                 name,
                 key,
                 size,
+                inserted_at: modified_at.clone(),
+                modified_at,
                 in_metadata: None,
             })
         })
@@ -751,7 +783,12 @@ pub async fn get_game(name: String, refresh: bool) -> Result<GameDetails, Error>
     Ok(details)
 }
 
-pub async fn upload_media(game: String, kind: String, path: String) -> Result<UploadResult, Error> {
+pub async fn upload_media(
+    game: String,
+    kind: String,
+    path: String,
+    file_name: Option<String>,
+) -> Result<UploadResult, Error> {
     let settings = build_client()?;
     let game = sanitize_game_name(&game)?;
     let source = PathBuf::from(&path);
@@ -759,6 +796,12 @@ pub async fn upload_media(game: String, kind: String, path: String) -> Result<Up
         return Err(Error::Message("Arquivo não encontrado.".into()));
     }
 
+    let object_path = file_name
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| source.clone());
     let ext = extension(&source);
     let key = match kind.as_str() {
         "cover" => {
@@ -780,14 +823,14 @@ pub async fn upload_media(game: String, kind: String, path: String) -> Result<Up
             format!("{game}/{ICON_FILE}")
         }
         "image" => {
-            let name = image_object_name(&source)?;
+            let name = image_object_name(&object_path)?;
             format!("{game}/images/{name}")
         }
         "video" => {
             if ext != "mp4" {
                 return Err(Error::Message("Os clips devem ser arquivos .mp4.".into()));
             }
-            let stem = file_stem(&source)?;
+            let stem = file_stem(&object_path)?;
             format!("{game}/videos/{stem}/{stem}.mp4")
         }
         other => {
@@ -795,7 +838,7 @@ pub async fn upload_media(game: String, kind: String, path: String) -> Result<Up
         }
     };
 
-    let file_name = file_name(&source)?;
+    let mime_name = path_file_name(&object_path).or_else(|_| path_file_name(&source))?;
     let body = ByteStream::from_path(&source)
         .await
         .map_err(|error| Error::Message(format!("Não foi possível ler o arquivo: {error}")))?;
@@ -806,7 +849,7 @@ pub async fn upload_media(game: String, kind: String, path: String) -> Result<Up
         .bucket(&settings.bucket)
         .key(&key)
         .body(body)
-        .content_type(mime_of(&file_name))
+        .content_type(mime_of(&mime_name))
         .send()
         .await
         .map_err(|error| Error::S3(error.to_string()))?;

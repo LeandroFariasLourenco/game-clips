@@ -26,7 +26,19 @@ export interface MediaFile {
   key: string;
   url: string;
   size: number;
+  insertedAt?: string;
+  modifiedAt?: string;
   inMetadata?: boolean;
+}
+
+export interface GameMetadataVideo {
+  url: string;
+  thumb: string;
+}
+
+export interface GameMetadata {
+  images: string[];
+  videos: GameMetadataVideo[];
 }
 
 export interface GameMetadataResult {

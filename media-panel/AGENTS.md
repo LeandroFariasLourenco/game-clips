@@ -50,17 +50,21 @@ Arquivo crítico para o client. Formato:
 
 A montagem fica em `server/gameMetadata.ts` (`buildGameMetadata`, `listingFromObjectKeys`, `serializeGameMetadata`). O sync local (`server/prepareMedia.ts`) e os writes no S3 devem reutilizar isso. O equivalente Rust está em `src-tauri/src/s3.rs`.
 
-Ao abrir um jogo, a barra de detalhes mostra se o jogo tem `metadata.json` no bucket (**metadata.json** / **Sem metadata.json**). Cada screenshot/clip da listagem usa cor de fundo e ícone conforme o vínculo com esse arquivo. Depois de **Atualizar metadata**, os detalhes são recarregados.
+Ao abrir um jogo, a barra de detalhes mostra se o jogo tem `metadata.json` no bucket (**metadata.json** / **Sem metadata.json**). Cada screenshot/clip da listagem usa cor de fundo e ícone conforme o vínculo com esse arquivo. O botão **Metadata** abre o JSON atual; **Gerar metadata.json** nessa tela regrava o arquivo e recarrega os detalhes.
 
 Regenerar no S3:
 
 - automaticamente após upload de **image** ou **video** (não após capa/banner/ícone)
 - ao criar o jogo (JSON vazio)
-- no botão **Atualizar metadata** (`POST /api/games/:nome/metadata` ou comando `refresh_game_metadata`)
+- no botão **Gerar metadata.json** (`GET/POST /api/games/:nome/metadata` ou comandos `get_game_metadata` / `refresh_game_metadata`)
 
 Capa, banner e ícone **não** entram no JSON. Clips soltos em `videos/*.mp4` não entram até estarem em `videos/<nome>/<nome>.mp4`.
 
-Remoção de screenshot/clip: `DELETE /api/games/:nome/file?key=…` ou comando `delete_media`. Só aceita keys em `images/` ou `videos/`. Clip em pasta apaga a pasta inteira (`mp4` + `thumb.jpg`). Depois o painel regenera `metadata.json`. **Nunca** apague pelo frontend sem a janela de confirmação.
+Remoção de jogo: botão direito na lista da esquerda. Só é permitido sem screenshots nem clips. Remoção de screenshot/clip: botão direito na linha da listagem (não há ícone de lixeira visível). Em seguida `DELETE /api/games/:nome/file?key=…` ou comando `delete_media`. Só aceita keys em `images/` ou `videos/`. Clip em pasta apaga a pasta inteira (`mp4` + `thumb.jpg`). Depois o painel regenera `metadata.json`. **Nunca** apague pelo frontend sem a janela de confirmação.
+
+A listagem de imagens e vídeos mostra a inserção a partir do `LastModified` do objeto no S3. A data original do arquivo fica no nome (`YYYYMMDDHHmmss-…`).
+
+Upload de screenshot/clip (botão ou arraste, um ou vários arquivos): o painel mostra o nome final `YYYYMMDDHHmmss-nomeoriginal.ext` (mtime local) e só envia depois da confirmação. Capa, banner e ícone não usam esse padrão.
 
 ## Dois runtimes
 
@@ -76,7 +80,7 @@ No navegador, capas passam por `/api/asset?key=…` (cache local). No Tauri, as 
 
 ## Pasta local
 
-`server/localMedia.ts` aponta para `../media` (raiz do repo, no `.gitignore` da biblioteca). O sync: (1) padroniza clips, gera `thumb.jpg` com ffmpeg, grava `metadata.json`; (2) `aws s3 sync` da pasta inteira. Exige AWS CLI e ffmpeg no PATH.
+`server/localMedia.ts` aponta para `../media` (raiz do repo, no `.gitignore` da biblioteca). O sync: (1) padroniza nomes `YYYYMMDDHHmmss-nome.ext` (mtime local) em `images/` e clips, move clips para subpastas, gera `thumb.jpg` com ffmpeg, grava `metadata.json`; (2) `aws s3 sync` da pasta inteira. Exige AWS CLI e ffmpeg no PATH.
 
 ## Frontend
 

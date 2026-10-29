@@ -11,6 +11,7 @@ import {
   deleteMediaFile,
   getAsset,
   getGame,
+  getGameMetadata,
   listGames,
   refreshGameMetadata,
   uploadMedia,
@@ -80,9 +81,16 @@ function s3ApiPlugin(): Plugin {
           }
 
           const metadataMatch = url.pathname.match(/^\/api\/games\/([^/]+)\/metadata$/);
-          if (req.method === "POST" && metadataMatch) {
-            sendJson(res, 200, await refreshGameMetadata(decodeURIComponent(metadataMatch[1])));
-            return;
+          if (metadataMatch) {
+            const gameName = decodeURIComponent(metadataMatch[1]);
+            if (req.method === "GET") {
+              sendJson(res, 200, await getGameMetadata(gameName));
+              return;
+            }
+            if (req.method === "POST") {
+              sendJson(res, 200, await refreshGameMetadata(gameName));
+              return;
+            }
           }
 
           const fileMatch = url.pathname.match(/^\/api\/games\/([^/]+)\/file$/);

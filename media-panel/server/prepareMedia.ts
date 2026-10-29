@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdir, readdir, readFile, rename, writeFile } from "node:fs/promises";
-import { basename, extname, join } from "node:path";
+import { mkdir, readdir, readFile, rename, stat, writeFile } from "node:fs/promises";
+import { basename, dirname, extname, join, parse, resolve } from "node:path";
 import {
   IMAGE_EXTENSIONS,
   METADATA_FILE,
@@ -47,6 +47,90 @@ async function listDirs(dir: string): Promise<string[]> {
 
 function isMp4(fileName: string): boolean {
   return extname(fileName).toLowerCase() === VIDEO_EXTENSION;
+}
+
+function isGalleryImage(fileName: string): boolean {
+  return IMAGE_EXTENSIONS.has(extname(fileName).toLowerCase());
+}
+
+const STANDARDIZED_STEM = /^\d{14}-.+/;
+
+function pad2(value: number): string {
+  return String(value).padStart(2, "0");
+}
+
+function formatLocalTimestamp(date: Date): string {
+  return (
+    `${date.getFullYear()}${pad2(date.getMonth() + 1)}${pad2(date.getDate())}` +
+    `${pad2(date.getHours())}${pad2(date.getMinutes())}${pad2(date.getSeconds())}`
+  );
+}
+
+function isStandardizedFileName(fileName: string): boolean {
+  return STANDARDIZED_STEM.test(parse(fileName).name);
+}
+
+async function uniqueName(parentDir: string, name: string, sourcePath: string, asDir: boolean): Promise<string> {
+  const parsed = parse(name);
+  let candidate = name;
+  let suffix = 2;
+  while (true) {
+    const fullPath = join(parentDir, candidate);
+    if (!existsSync(fullPath) || resolve(fullPath) === resolve(sourcePath)) return candidate;
+    candidate = asDir ? `${name}-${suffix}` : `${parsed.name}-${suffix}${parsed.ext}`;
+    suffix += 1;
+  }
+}
+
+async function renameToStandard(filePath: string): Promise<{ renamed: boolean; fileName: string }> {
+  const dirPath = dirname(filePath);
+  const fileName = basename(filePath);
+  const stamp = isStandardizedFileName(fileName)
+    ? ""
+    : formatLocalTimestamp((await stat(filePath)).mtime);
+  const desired = isStandardizedFileName(fileName)
+    ? fileName
+    : `${stamp}-${parse(fileName).name}${parse(fileName).ext}`;
+  const nextName = await uniqueName(dirPath, desired, filePath, false);
+  if (nextName === fileName) return { renamed: false, fileName };
+  await rename(filePath, join(dirPath, nextName));
+  return { renamed: true, fileName: nextName };
+}
+
+async function applyTimestampNames(imagesDir: string, videosDir: string): Promise<number> {
+  let renamed = 0;
+
+  if (existsSync(imagesDir)) {
+    for (const fileName of (await listNames(imagesDir)).filter(isGalleryImage)) {
+      const result = await renameToStandard(join(imagesDir, fileName));
+      if (result.renamed) renamed += 1;
+    }
+  }
+
+  if (!existsSync(videosDir)) return renamed;
+
+  for (const fileName of (await listNames(videosDir)).filter(isMp4)) {
+    const result = await renameToStandard(join(videosDir, fileName));
+    if (result.renamed) renamed += 1;
+  }
+
+  for (const folder of await listDirs(videosDir)) {
+    const folderPath = join(videosDir, folder);
+    const videos = (await listNames(folderPath)).filter(isMp4);
+    const namesAfter: string[] = [];
+    for (const fileName of videos) {
+      const result = await renameToStandard(join(folderPath, fileName));
+      namesAfter.push(result.fileName);
+      if (result.renamed) renamed += 1;
+    }
+    if (namesAfter.length !== 1) continue;
+    const nextFolder = await uniqueName(videosDir, parse(namesAfter[0]).name, folderPath, true);
+    if (nextFolder === folder) continue;
+    await rename(folderPath, join(videosDir, nextFolder));
+    renamed += 1;
+  }
+
+  return renamed;
 }
 
 function run(command: string, args: string[]): Promise<{ code: number | null; stdout: string; stderr: string }> {
@@ -252,8 +336,14 @@ export async function prepareLocalMedia(options: {
   for (const game of games) {
     report.games += 1;
     const gameDir = join(options.root, game);
+    const imagesDir = join(gameDir, "images");
     const videosDir = join(gameDir, "videos");
     try {
+      const stamped = await applyTimestampNames(imagesDir, videosDir);
+      report.renamed += stamped;
+      if (stamped > 0) {
+        logLine(options.log, `${game}: ${stamped} arquivo(s) padronizado(s) como dataehora-nome.ext`);
+      }
       if (existsSync(videosDir)) {
         const standardized = await standardizeVideos(videosDir);
         report.moved += standardized.moved;

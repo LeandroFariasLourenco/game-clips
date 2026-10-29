@@ -67,6 +67,8 @@ export interface MediaFile {
   key: string;
   url: string;
   size: number;
+  insertedAt?: string;
+  modifiedAt?: string;
   inMetadata?: boolean;
 }
 
@@ -315,6 +317,7 @@ function groupVideos(game: string, objects: _Object[]): MediaFile[] {
       key,
       url: mediaUrl(publicBaseUrl, key),
       size: object.Size ?? 0,
+      ...objectTimestamps(object),
     });
   }
 
@@ -328,6 +331,7 @@ function groupVideos(game: string, objects: _Object[]): MediaFile[] {
       key,
       url: mediaUrl(publicBaseUrl, key),
       size: object.Size ?? 0,
+      ...objectTimestamps(object),
     });
   }
 
@@ -341,8 +345,17 @@ function markLinked(files: MediaFile[], paths: Set<string>): MediaFile[] {
   }));
 }
 
+function objectTimestamps(object: _Object): Pick<MediaFile, "insertedAt" | "modifiedAt"> {
+  const modifiedAt = object.LastModified?.toISOString();
+  return { insertedAt: modifiedAt, modifiedAt };
+}
+
 function detailsHaveMetadataFlags(details: GameDetails): boolean {
   return typeof details.hasMetadata === "boolean";
+}
+
+function detailsHaveFileDates(details: GameDetails): boolean {
+  return [...details.images, ...details.videos].every((file) => typeof file.modifiedAt === "string");
 }
 
 async function readStoredMetadata(game: string): Promise<GameMetadata | null> {
@@ -383,6 +396,7 @@ async function getGameFromS3(name: string): Promise<GameDetails> {
         key,
         url: mediaUrl(publicBaseUrl, key),
         size: object.Size ?? 0,
+        ...objectTimestamps(object),
       };
     })
     .filter((file) => file.name && !file.name.includes("/"))
@@ -400,6 +414,10 @@ async function getGameFromS3(name: string): Promise<GameDetails> {
     images: markLinked(images, linked.images),
     videos: markLinked(groupVideos(game, videoObjects), linked.videos),
   };
+}
+
+export async function getGameMetadata(name: string): Promise<GameMetadata | null> {
+  return readStoredMetadata(sanitizeGameName(name));
 }
 
 export async function refreshGameMetadata(name: string): Promise<GameMetadataWriteResult> {
@@ -439,7 +457,7 @@ export async function getGame(name: string, options?: { refresh?: boolean }): Pr
   const game = sanitizeGameName(name);
   if (!options?.refresh) {
     const cached = await readGameDetails(game);
-    if (cached && detailsHaveMetadataFlags(cached)) {
+    if (cached && detailsHaveMetadataFlags(cached) && detailsHaveFileDates(cached)) {
       void prefetchAssets(imageKeysForGame(cached));
       return { ...cached, fromCache: true };
     }
