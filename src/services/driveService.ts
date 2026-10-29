@@ -8,6 +8,7 @@ import {
   getGamesManifestUrl,
   getMediaBaseUrl,
   getMediaLibraryLabel,
+  videoUrlBesideThumb,
 } from '../config/mediaConfig';
 import { clearGamesCache, readCachedText, storeCachedResponse } from './gamesCache';
 import { clearMediaCache } from './mediaCache';
@@ -62,7 +63,7 @@ export function mapListedVideosToMedia(game: Game, files: WorkerListedFile[]): G
     type: 'video',
     mimeType: file.mimeType || 'video/mp4',
     size: Number(file.size || 0),
-    url: file.url,
+    url: videoUrlBesideThumb(file.url, file.thumbnailUrl, file.name),
     thumbnailUrl: file.thumbnailUrl,
     createdTime: file.createdTime,
   }));

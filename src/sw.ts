@@ -49,10 +49,19 @@ try {
   // Media caching still runs when the precached shell URL is unavailable.
 }
 
+function isVideoFileUrl(href: string): boolean {
+  try {
+    return /\.(mp4|webm|mkv|mov|avi)$/i.test(decodeURIComponent(new URL(href).pathname));
+  } catch {
+    return false;
+  }
+}
+
 registerRoute(
   ({ request, url }) =>
     request.method === 'GET' &&
     !request.headers.has('range') &&
+    !isVideoFileUrl(url.href) &&
     isMediaAssetUrl(url.href),
   ({ request }) => cacheFirstMedia(request),
 );

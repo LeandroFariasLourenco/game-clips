@@ -248,17 +248,19 @@ export const GameDetails: React.FC<GameDetailsProps> = ({ game }) => {
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
                   {imagesList.map((item) => (
-                    <div
+                    <button
+                      type="button"
                       key={item.id}
                       onClick={() => setSelectedMedia(item)}
-                      className="group relative aspect-video rounded-xl overflow-hidden bg-zinc-900 border border-zinc-800 hover:border-purple-500/60 cursor-pointer shadow-md hover:shadow-xl hover:shadow-purple-500/10 transition duration-300"
+                      aria-label="Abrir imagem em tamanho real"
+                      className="group relative aspect-video rounded-xl overflow-hidden bg-zinc-900 border border-zinc-800 hover:border-purple-500/60 cursor-pointer shadow-md hover:shadow-xl hover:shadow-purple-500/10 transition duration-300 text-left"
                     >
                       <MediaPreview
                         kind="image"
                         src={item.url || item.thumbnailUrl || ''}
                         className="w-full h-full object-cover group-hover:scale-105 transition duration-500"
                       />
-                    </div>
+                    </button>
                   ))}
                 </div>
               </section>
@@ -281,10 +283,12 @@ export const GameDetails: React.FC<GameDetailsProps> = ({ game }) => {
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
                   {videosList.map((item) => (
-                    <div
+                    <button
+                      type="button"
                       key={item.id}
                       onClick={() => setSelectedMedia(item)}
-                      className="group relative aspect-video rounded-xl overflow-hidden bg-zinc-950 border border-zinc-800 hover:border-purple-500/60 cursor-pointer shadow-md hover:shadow-xl hover:shadow-purple-500/10 transition duration-300"
+                      aria-label={`Reproduzir ${item.name}`}
+                      className="group relative aspect-video rounded-xl overflow-hidden bg-zinc-950 border border-zinc-800 hover:border-purple-500/60 cursor-pointer shadow-md hover:shadow-xl hover:shadow-purple-500/10 transition duration-300 text-left"
                     >
                       <MediaPreview
                         kind="image"
@@ -298,7 +302,7 @@ export const GameDetails: React.FC<GameDetailsProps> = ({ game }) => {
                           <Play className="w-4 h-4 fill-white ml-0.5" />
                         </div>
                       </div>
-                    </div>
+                    </button>
                   ))}
                 </div>
               </section>

@@ -15,6 +15,7 @@ import {
   matchBrandingAsset,
   resolveMediaBaseUrl,
   resolveMediaWorkerUrl,
+  videoUrlBesideThumb,
 } from '../config/mediaConfig';
 import { isMediaAssetUrl } from '../services/mediaAssetUrl';
 import { collectGameMediaCacheUrls } from '../services/mediaCache';
@@ -350,6 +351,18 @@ test('media URLs always point to the public bucket', () => {
   assert.equal(
     videos[0].thumbnailUrl,
     `${DEFAULT_MEDIA_WORKER_URL}/Battlefield%206/videos/ClipedeMomentsdeOct102026%20(5)/thumb.jpg`
+  );
+  assert.equal(
+    videos[0].url,
+    `${DEFAULT_MEDIA_WORKER_URL}/Battlefield%206/videos/ClipedeMomentsdeOct102026%20(5)/ClipedeMomentsdeOct102026%20(5).mp4`
+  );
+  assert.equal(
+    videoUrlBesideThumb(
+      `${DEFAULT_MEDIA_WORKER_URL}/FIFA%2015/videos/clip.mp4`,
+      `${DEFAULT_MEDIA_WORKER_URL}/FIFA%2015/videos/clip/thumb.jpg`,
+      'clip.mp4',
+    ),
+    `${DEFAULT_MEDIA_WORKER_URL}/FIFA%2015/videos/clip/clip.mp4`
   );
 });
 

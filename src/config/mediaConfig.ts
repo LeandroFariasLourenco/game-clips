@@ -93,6 +93,46 @@ export function getGameImagesUrl(folderName: string): string {
 }
 
 export const VIDEO_THUMB_FILE = 'thumb.jpg';
+const VIDEO_FILE_RE = /\.(mp4|webm|mkv|mov|avi)$/i;
+
+export function videoFileNameFromUrl(pathOrUrl: string): string {
+  try {
+    return decodeURIComponent(new URL(pathOrUrl).pathname.split('/').pop() || '');
+  } catch {
+    return decodeURIComponent(pathOrUrl.split('?')[0].split('/').pop() || '');
+  }
+}
+
+/** Clip mp4 lives beside thumb.jpg: videos/<clip>/<clip>.mp4 */
+export function videoUrlBesideThumb(
+  videoUrl: string,
+  thumbnailUrl?: string,
+  fileName?: string,
+): string {
+  if (!thumbnailUrl) return videoUrl;
+
+  try {
+    const thumb = new URL(thumbnailUrl);
+    const segments = thumb.pathname.split('/').filter(Boolean);
+    const thumbName = decodeURIComponent(segments[segments.length - 1] || '');
+    if (thumbName.toLowerCase() !== VIDEO_THUMB_FILE || segments.length < 2) {
+      return videoUrl;
+    }
+
+    const folder = decodeURIComponent(segments[segments.length - 2] || '');
+    const listed = fileName && VIDEO_FILE_RE.test(fileName) ? fileName : '';
+    const fromVideo = videoFileNameFromUrl(videoUrl);
+    const playbackName =
+      listed || (VIDEO_FILE_RE.test(fromVideo) ? fromVideo : '') || (folder ? `${folder}.mp4` : '');
+    if (!playbackName) return videoUrl;
+
+    segments[segments.length - 1] = encodeURIComponent(playbackName);
+    thumb.pathname = `/${segments.join('/')}`;
+    return thumb.toString();
+  } catch {
+    return videoUrl;
+  }
+}
 
 export function gameVideosUrl(workerUrl: string, folderName: string): string {
   return `${resolveMediaWorkerUrl(workerUrl)}/${encodeMediaPath([folderName, 'videos'])}`;
