@@ -1,0 +1,37 @@
+{
+  "id": "./",
+  "name": "Biblioteca de Jogos",
+  "short_name": "Jogos",
+  "description": "Catálogo e mídias da biblioteca de jogos, com acesso offline ao conteúdo em cache.",
+  "lang": "pt-BR",
+  "dir": "ltr",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "display_override": ["standalone", "minimal-ui", "browser"],
+  "orientation": "any",
+  "background_color": "#121212",
+  "theme_color": "#121212",
+  "prefer_related_applications": false,
+  "categories": ["entertainment", "games"],
+  "icons": [
+    {
+      "src": "pwa-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "pwa-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "pwa-maskable-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}

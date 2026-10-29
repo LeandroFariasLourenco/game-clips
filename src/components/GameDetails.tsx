@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { AnimatePresence, motion } from 'motion/react';
 import { Game, GameMedia } from '../types/game';
 import { localAssetService } from '../services/driveAssetService';
 import { localLibraryService } from '../services/driveService';
@@ -11,11 +12,17 @@ import {
   ExternalLink,
   HardDrive,
   Calendar,
-  Layers,
   Gamepad2,
+  ChevronDown,
 } from 'lucide-react';
 import { MediaViewerModal } from './MediaViewerModal';
 import { MediaPreview } from './MediaPreview';
+import { ShimmerImage } from '../directives/ShimmerImage';
+import { revealDelay, revealTransition } from '../motion';
+
+const MEDIA_PAGE_SIZE = 8;
+
+type MediaTab = 'all' | 'screenshot' | 'video' | 'backup';
 
 interface GameDetailsProps {
   game: Game;
@@ -24,13 +31,22 @@ interface GameDetailsProps {
 export const GameDetails: React.FC<GameDetailsProps> = ({ game }) => {
   const [mediaList, setMediaList] = useState<GameMedia[]>([]);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<'all' | 'screenshot' | 'video' | 'backup'>('all');
+  const [activeTab, setActiveTab] = useState<MediaTab>('all');
+  const [visibleImagesCount, setVisibleImagesCount] = useState(MEDIA_PAGE_SIZE);
+  const [visibleVideosCount, setVisibleVideosCount] = useState(MEDIA_PAGE_SIZE);
+  const [visibleBackupsCount, setVisibleBackupsCount] = useState(MEDIA_PAGE_SIZE);
   const [selectedMedia, setSelectedMedia] = useState<GameMedia | null>(null);
 
   // Branding assets from the public media bucket
-  const [bannerUrl, setBannerUrl] = useState<string | null>(null);
-  const [coverUrl, setCoverUrl] = useState<string | null>(null);
-  const [iconUrl, setIconUrl] = useState<string | null>(null);
+  const [bannerUrl, setBannerUrl] = useState<string | null>(() =>
+    localAssetService.getGameBanner(game)
+  );
+  const [coverUrl, setCoverUrl] = useState<string | null>(() =>
+    localAssetService.getGameCover(game)
+  );
+  const [iconUrl, setIconUrl] = useState<string | null>(() =>
+    localAssetService.getGameIcon(game)
+  );
 
   useEffect(() => {
     const banner = localAssetService.getGameBanner(game);
@@ -91,12 +107,23 @@ export const GameDetails: React.FC<GameDetailsProps> = ({ game }) => {
 
   const hasVisibleMedia = showImagesSection || showVideosSection || showBackupsSection;
 
+  const visibleImages = imagesList.slice(0, visibleImagesCount);
+  const visibleVideos = videosList.slice(0, visibleVideosCount);
+  const visibleBackups = backupsList.slice(0, visibleBackupsCount);
+
+  const selectTab = (tab: MediaTab) => {
+    setActiveTab(tab);
+    setVisibleImagesCount(MEDIA_PAGE_SIZE);
+    setVisibleVideosCount(MEDIA_PAGE_SIZE);
+    setVisibleBackupsCount(MEDIA_PAGE_SIZE);
+  };
+
   return (
-    <div className="relative min-h-[calc(100vh-4rem)] pb-12 animate-fadeIn">
+    <div className="relative pb-12">
       {/* Background banner from the media bucket */}
       <div className="relative w-full h-[280px] sm:h-[380px] lg:h-[420px] overflow-hidden -mx-4 sm:-mx-6 lg:-mx-8 bg-zinc-950">
         {bannerUrl ? (
-          <img
+          <ShimmerImage
             src={bannerUrl}
             alt=""
             className="w-full h-full object-cover brightness-[0.7] contrast-105 scale-100"
@@ -114,59 +141,74 @@ export const GameDetails: React.FC<GameDetailsProps> = ({ game }) => {
         )}
 
         {/* Cinematic Vignette Gradients */}
-        <div className="absolute inset-0 bg-gradient-to-t from-[#121212] via-[#121212]/70 to-transparent" />
-        <div className="absolute inset-0 bg-gradient-to-r from-[#121212]/90 via-[#121212]/40 to-transparent" />
+        <div className="absolute inset-0 bg-gradient-to-t from-[#121212] via-[#121212]/80 to-transparent" />
+        <div className="absolute inset-0 bg-gradient-to-r from-[#121212]/80 via-[#121212]/30 to-transparent" />
 
-        {(iconUrl || game.releaseYear || game.genre || game.steamAppId) && (
-          <div className="absolute bottom-6 left-4 sm:left-8 right-4 sm:right-8 z-10 max-w-4xl">
-            {(game.releaseYear || game.genre || game.steamAppId) && (
-              <div className="flex flex-wrap items-center gap-3 text-xs text-zinc-300 mb-2">
-                {game.releaseYear && (
-                  <span className="flex items-center gap-1 text-zinc-400">
-                    <Calendar className="w-3.5 h-3.5" />
-                    {game.releaseYear}
-                  </span>
-                )}
-
-                {game.genre && (
-                  <span className="flex items-center gap-1 text-zinc-400">
-                    <Layers className="w-3.5 h-3.5" />
-                    {game.genre}
-                  </span>
-                )}
-
-                {game.steamAppId && (
-                  <a
-                    href={`https://store.steampowered.com/app/${game.steamAppId}`}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="inline-flex items-center gap-1 text-xs text-indigo-400 hover:text-indigo-300 underline underline-offset-2 ml-auto"
-                  >
-                    <span>Steam Store</span>
-                    <ExternalLink className="w-3 h-3" />
-                  </a>
+        <div className="absolute inset-x-0 bottom-0 z-10 px-4 sm:px-8 pb-4 sm:pb-6">
+          <div className="flex items-end justify-between gap-3 sm:gap-6">
+            <div className="flex items-center gap-2.5 sm:gap-4 min-w-0">
+              <div className="w-10 h-10 sm:w-14 sm:h-14 lg:w-16 lg:h-16 rounded-lg sm:rounded-xl bg-zinc-900/80 border border-zinc-700/60 p-1 shadow-lg shrink-0 overflow-hidden">
+                {iconUrl ? (
+                  <ShimmerImage
+                    src={iconUrl}
+                    alt=""
+                    className="w-full h-full object-contain"
+                    onError={() => setIconUrl(null)}
+                  />
+                ) : (
+                  <div className="w-full h-full flex items-center justify-center">
+                    <Gamepad2 className="w-5 h-5 sm:w-6 sm:h-6 text-zinc-500" />
+                  </div>
                 )}
               </div>
-            )}
+              <div className="min-w-0">
+                <h1 className="text-base sm:text-2xl lg:text-3xl font-bold text-white leading-tight line-clamp-2 drop-shadow-[0_2px_8px_rgba(0,0,0,0.8)]">
+                  {game.name}
+                </h1>
+                {(game.releaseYear || game.steamAppId) && (
+                  <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] sm:text-xs text-zinc-300">
+                    {game.releaseYear && (
+                      <span className="flex items-center gap-1 text-zinc-400">
+                        <Calendar className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
+                        {game.releaseYear}
+                      </span>
+                    )}
+                    {game.steamAppId && (
+                      <a
+                        href={`https://store.steampowered.com/app/${game.steamAppId}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex items-center gap-1 text-indigo-400 hover:text-indigo-300 underline underline-offset-2"
+                      >
+                        <span>Steam Store</span>
+                        <ExternalLink className="w-3 h-3" />
+                      </a>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
 
-            {iconUrl && (
-              <img
-                src={iconUrl}
-                alt=""
-                className="w-12 h-12 sm:w-16 sm:h-16 rounded-xl object-contain bg-zinc-900/80 border border-zinc-700/60 p-1 shadow-lg shrink-0"
-                onError={() => setIconUrl(null)}
-              />
+            {coverUrl && (
+              <div className="w-[72px] sm:w-[110px] md:w-[132px] lg:w-[150px] aspect-[5/7] rounded-md sm:rounded-lg overflow-hidden border border-zinc-700/80 shadow-2xl shrink-0 bg-zinc-950">
+                <ShimmerImage
+                  src={coverUrl}
+                  alt={`Capa de ${game.name}`}
+                  className="w-full h-full object-cover"
+                  onError={() => setCoverUrl(null)}
+                />
+              </div>
             )}
           </div>
-        )}
+        </div>
       </div>
 
       {/* Media Filter Tabs */}
-      <div className="mt-8 flex flex-wrap items-center gap-4 border-b border-zinc-800/80 pb-4">
-        <div className="flex flex-wrap items-center gap-2">
+      <div className="sticky top-0 z-20 -mx-4 sm:-mx-6 lg:-mx-8 mt-6 bg-[#121212]/92 backdrop-blur-md border-b border-zinc-800/80">
+        <div className="flex flex-nowrap items-center gap-2 overflow-x-auto px-4 sm:px-6 lg:px-8 py-3 scrollbar-none [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           <button
-            onClick={() => setActiveTab('all')}
-            className={`px-3.5 py-1.5 rounded-full text-xs font-medium transition cursor-pointer ${
+            onClick={() => selectTab('all')}
+            className={`px-3.5 py-1.5 rounded-full text-xs font-medium transition cursor-pointer shrink-0 ${
               activeTab === 'all'
                 ? 'bg-purple-600 text-white shadow-md shadow-purple-600/30'
                 : 'bg-zinc-900 text-zinc-400 hover:text-zinc-200 border border-zinc-800'
@@ -175,8 +217,8 @@ export const GameDetails: React.FC<GameDetailsProps> = ({ game }) => {
             Todas as Mídias ({mediaList.length})
           </button>
           <button
-            onClick={() => setActiveTab('screenshot')}
-            className={`px-3.5 py-1.5 rounded-full text-xs font-medium transition cursor-pointer flex items-center gap-1.5 ${
+            onClick={() => selectTab('screenshot')}
+            className={`px-3.5 py-1.5 rounded-full text-xs font-medium transition cursor-pointer flex items-center gap-1.5 shrink-0 ${
               activeTab === 'screenshot'
                 ? 'bg-purple-600 text-white shadow-md shadow-purple-600/30'
                 : 'bg-zinc-900 text-zinc-400 hover:text-zinc-200 border border-zinc-800'
@@ -186,8 +228,8 @@ export const GameDetails: React.FC<GameDetailsProps> = ({ game }) => {
             <span>Imagens ({imagesList.length})</span>
           </button>
           <button
-            onClick={() => setActiveTab('video')}
-            className={`px-3.5 py-1.5 rounded-full text-xs font-medium transition cursor-pointer flex items-center gap-1.5 ${
+            onClick={() => selectTab('video')}
+            className={`px-3.5 py-1.5 rounded-full text-xs font-medium transition cursor-pointer flex items-center gap-1.5 shrink-0 ${
               activeTab === 'video'
                 ? 'bg-purple-600 text-white shadow-md shadow-purple-600/30'
                 : 'bg-zinc-900 text-zinc-400 hover:text-zinc-200 border border-zinc-800'
@@ -198,8 +240,8 @@ export const GameDetails: React.FC<GameDetailsProps> = ({ game }) => {
           </button>
           {backupsList.length > 0 && (
             <button
-              onClick={() => setActiveTab('backup')}
-              className={`px-3.5 py-1.5 rounded-full text-xs font-medium transition cursor-pointer flex items-center gap-1.5 ${
+              onClick={() => selectTab('backup')}
+              className={`px-3.5 py-1.5 rounded-full text-xs font-medium transition cursor-pointer flex items-center gap-1.5 shrink-0 ${
                 activeTab === 'backup'
                   ? 'bg-purple-600 text-white shadow-md shadow-purple-600/30'
                   : 'bg-zinc-900 text-zinc-400 hover:text-zinc-200 border border-zinc-800'
@@ -231,123 +273,169 @@ export const GameDetails: React.FC<GameDetailsProps> = ({ game }) => {
           </div>
         ) : (
           <>
-            {/* Seção de Imagens */}
             {showImagesSection && (
-              <section>
-                <div className="flex items-center justify-between mb-4 px-1">
-                  <div className="flex items-center gap-2">
-                    <ImageIcon className="w-4 h-4 text-purple-400" />
-                    <h2 className="text-sm font-bold tracking-wider uppercase text-zinc-200 font-sans">
-                      Imagens
-                    </h2>
-                  </div>
-                  <span className="text-xs text-zinc-500 font-mono">
-                    {imagesList.length} {imagesList.length === 1 ? 'imagem' : 'imagens'}
-                  </span>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-                  {imagesList.map((item) => (
-                    <button
-                      type="button"
-                      key={item.id}
-                      onClick={() => setSelectedMedia(item)}
-                      aria-label="Abrir imagem em tamanho real"
-                      className="group relative aspect-video rounded-xl overflow-hidden bg-zinc-900 border border-zinc-800 hover:border-purple-500/60 cursor-pointer shadow-md hover:shadow-xl hover:shadow-purple-500/10 transition duration-300 text-left"
-                    >
-                      <MediaPreview
-                        kind="image"
-                        src={item.url || item.thumbnailUrl || ''}
-                        className="w-full h-full object-cover group-hover:scale-105 transition duration-500"
-                      />
-                    </button>
-                  ))}
-                </div>
-              </section>
+              <MediaSection
+                title="Imagens"
+                icon={<ImageIcon className="w-4 h-4 text-purple-400" />}
+                countLabel={`${imagesList.length} ${imagesList.length === 1 ? 'imagem' : 'imagens'}`}
+                items={visibleImages}
+                onOpen={setSelectedMedia}
+                onLoadMore={
+                  visibleImages.length < imagesList.length
+                    ? () => setVisibleImagesCount((count) => count + MEDIA_PAGE_SIZE)
+                    : undefined
+                }
+                remaining={imagesList.length - visibleImages.length}
+              />
             )}
 
-            {/* Seção de Vídeos */}
             {showVideosSection && (
-              <section>
-                <div className="flex items-center justify-between mb-4 px-1">
-                  <div className="flex items-center gap-2">
-                    <Film className="w-4 h-4 text-rose-400" />
-                    <h2 className="text-sm font-bold tracking-wider uppercase text-zinc-200 font-sans">
-                      Vídeos
-                    </h2>
-                  </div>
-                  <span className="text-xs text-zinc-500 font-mono">
-                    {videosList.length} {videosList.length === 1 ? 'vídeo' : 'vídeos'}
-                  </span>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-                  {videosList.map((item) => (
-                    <button
-                      type="button"
-                      key={item.id}
-                      onClick={() => setSelectedMedia(item)}
-                      aria-label={`Reproduzir ${item.name}`}
-                      className="group relative aspect-video rounded-xl overflow-hidden bg-zinc-950 border border-zinc-800 hover:border-purple-500/60 cursor-pointer shadow-md hover:shadow-xl hover:shadow-purple-500/10 transition duration-300 text-left"
-                    >
-                      <MediaPreview
-                        kind="image"
-                        src={item.thumbnailUrl || ''}
-                        className="w-full h-full object-cover brightness-90 group-hover:brightness-100 group-hover:scale-105 transition duration-500"
-                      />
-
-                      {/* Play Button Badge Overlay */}
-                      <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                        <div className="w-11 h-11 rounded-full bg-black/60 border border-white/20 backdrop-blur-sm text-white flex items-center justify-center shadow-lg group-hover:scale-110 group-hover:bg-purple-600/90 group-hover:border-purple-400 transition duration-300">
-                          <Play className="w-4 h-4 fill-white ml-0.5" />
-                        </div>
-                      </div>
-                    </button>
-                  ))}
-                </div>
-              </section>
+              <MediaSection
+                title="Vídeos"
+                icon={<Film className="w-4 h-4 text-rose-400" />}
+                countLabel={`${videosList.length} ${videosList.length === 1 ? 'vídeo' : 'vídeos'}`}
+                items={visibleVideos}
+                onOpen={setSelectedMedia}
+                onLoadMore={
+                  visibleVideos.length < videosList.length
+                    ? () => setVisibleVideosCount((count) => count + MEDIA_PAGE_SIZE)
+                    : undefined
+                }
+                remaining={videosList.length - visibleVideos.length}
+              />
             )}
 
-            {/* Seção de Saves & Backups */}
             {showBackupsSection && (
-              <section>
-                <div className="flex items-center justify-between mb-4 px-1">
-                  <div className="flex items-center gap-2">
-                    <Archive className="w-4 h-4 text-indigo-400" />
-                    <h2 className="text-sm font-bold tracking-wider uppercase text-zinc-200 font-sans">
-                      Saves & Backups
-                    </h2>
-                  </div>
-                  <span className="text-xs text-zinc-500 font-mono">
-                    {backupsList.length} {backupsList.length === 1 ? 'arquivo' : 'arquivos'}
-                  </span>
-                </div>
-
-                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
-                  {backupsList.map((item) => (
-                    <div
-                      key={item.id}
-                      onClick={() => setSelectedMedia(item)}
-                      className="group relative aspect-video rounded-xl overflow-hidden bg-zinc-950 border border-zinc-800 hover:border-purple-500/50 cursor-pointer shadow-md transition duration-300 flex flex-col items-center justify-center p-3 text-center"
-                      aria-label="Abrir arquivo"
-                    >
-                      <Archive className="w-8 h-8 text-indigo-400 group-hover:scale-110 transition" />
-                    </div>
-                  ))}
-                </div>
-              </section>
+              <MediaSection
+                title="Saves & Backups"
+                icon={<Archive className="w-4 h-4 text-indigo-400" />}
+                countLabel={`${backupsList.length} ${backupsList.length === 1 ? 'arquivo' : 'arquivos'}`}
+                items={visibleBackups}
+                onOpen={setSelectedMedia}
+                onLoadMore={
+                  visibleBackups.length < backupsList.length
+                    ? () => setVisibleBackupsCount((count) => count + MEDIA_PAGE_SIZE)
+                    : undefined
+                }
+                remaining={backupsList.length - visibleBackups.length}
+              />
             )}
           </>
         )}
       </div>
 
-      {/* Media Viewer Modal */}
-      {selectedMedia && (
-        <MediaViewerModal
-          media={selectedMedia}
-          onClose={() => setSelectedMedia(null)}
-        />
-      )}
+      <AnimatePresence>
+        {selectedMedia && (
+          <MediaViewerModal
+            key={selectedMedia.id}
+            media={selectedMedia}
+            onClose={() => setSelectedMedia(null)}
+          />
+        )}
+      </AnimatePresence>
     </div>
+  );
+};
+
+interface MediaSectionProps {
+  title: string;
+  icon: React.ReactNode;
+  countLabel: string;
+  items: GameMedia[];
+  remaining: number;
+  onOpen: (item: GameMedia) => void;
+  onLoadMore?: () => void;
+}
+
+const MediaSection: React.FC<MediaSectionProps> = ({
+  title,
+  icon,
+  countLabel,
+  items,
+  remaining,
+  onOpen,
+  onLoadMore,
+}) => (
+  <section>
+    <div className="flex items-center justify-between mb-4 px-1 gap-3">
+      <div className="flex items-center gap-2 min-w-0">
+        {icon}
+        <h2 className="text-sm font-bold tracking-wider uppercase text-zinc-200 font-sans">
+          {title}
+        </h2>
+      </div>
+      <span className="text-xs text-zinc-500 font-mono shrink-0">{countLabel}</span>
+    </div>
+
+    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-4">
+      {items.map((item, index) => (
+        <MediaTile key={item.id} item={item} index={index} onOpen={onOpen} />
+      ))}
+    </div>
+
+    {onLoadMore && remaining > 0 && (
+      <div className="mt-5 flex justify-center">
+        <button
+          type="button"
+          onClick={onLoadMore}
+          className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full bg-zinc-900 border border-zinc-800 text-xs font-medium text-zinc-200 hover:text-white hover:border-zinc-600 cursor-pointer transition"
+        >
+          Ver mais {Math.min(MEDIA_PAGE_SIZE, remaining)}
+          <ChevronDown className="w-3.5 h-3.5" />
+        </button>
+      </div>
+    )}
+  </section>
+);
+
+const MediaTile: React.FC<{
+  item: GameMedia;
+  index: number;
+  onOpen: (item: GameMedia) => void;
+}> = ({ item, index, onOpen }) => {
+  const revealProps = {
+    initial: { opacity: 0, y: 16 },
+    whileInView: { opacity: 1, y: 0 },
+    viewport: { once: true, amount: 0.15 },
+    transition: { ...revealTransition, delay: revealDelay(index, 8) },
+  } as const;
+
+  if (item.type === 'backup') {
+    return (
+      <motion.button
+        type="button"
+        onClick={() => onOpen(item)}
+        className="group relative aspect-video rounded-xl overflow-hidden bg-zinc-950 border border-zinc-800 hover:border-purple-500/50 cursor-pointer shadow-md transition duration-300 flex flex-col items-center justify-center p-3 text-center"
+        aria-label="Abrir arquivo"
+        {...revealProps}
+      >
+        <Archive className="w-8 h-8 text-indigo-400 group-hover:scale-110 transition" />
+      </motion.button>
+    );
+  }
+
+  const isVideo = item.type === 'video';
+
+  return (
+    <motion.button
+      type="button"
+      onClick={() => onOpen(item)}
+      aria-label={isVideo ? `Reproduzir ${item.name}` : 'Abrir imagem em tamanho real'}
+      className="group relative aspect-video rounded-xl overflow-hidden bg-zinc-950 border border-zinc-800 hover:border-purple-500/60 cursor-pointer shadow-md hover:shadow-xl hover:shadow-purple-500/10 transition duration-300 text-left"
+      {...revealProps}
+    >
+      <MediaPreview
+        kind="image"
+        src={isVideo ? item.thumbnailUrl || '' : item.url || item.thumbnailUrl || ''}
+        className={`w-full h-full object-cover group-hover:scale-105 transition duration-500 ${isVideo ? 'brightness-90 group-hover:brightness-100' : ''}`}
+      />
+      {isVideo && (
+        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+          <div className="w-11 h-11 rounded-full bg-black/60 border border-white/20 backdrop-blur-sm text-white flex items-center justify-center shadow-lg group-hover:scale-110 group-hover:bg-purple-600/90 group-hover:border-purple-400 transition duration-300">
+            <Play className="w-4 h-4 fill-white ml-0.5" />
+          </div>
+        </div>
+      )}
+    </motion.button>
   );
 };

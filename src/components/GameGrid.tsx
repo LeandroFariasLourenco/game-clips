@@ -4,7 +4,9 @@ import { Game } from '../types/game';
 import { getLocalBaseFolderName } from '../services/driveService';
 import { gameDetailsPath } from '../libraryContext';
 import { LazyGameCover } from './LazyGameCover';
-import { HardDrive, RefreshCw } from 'lucide-react';
+import { Reveal } from './Reveal';
+import { revealDelay } from '../motion';
+import { ChevronRight, HardDrive, RefreshCw } from 'lucide-react';
 
 interface GameGridProps {
   games: Game[];
@@ -87,31 +89,31 @@ export const GameGrid: React.FC<GameGridProps> = ({
 
   return (
     <section>
-      <div className="flex items-center justify-between mb-5 px-1">
-        <h2 className="text-sm font-bold tracking-wider uppercase text-zinc-300 font-sans">
-          Todos os Jogos
-        </h2>
-        <span className="text-xs text-zinc-500 font-mono">
-          {games.length} {games.length === 1 ? 'título' : 'títulos'}
-        </span>
-      </div>
+      <h2 className="text-sm font-bold tracking-wider uppercase text-zinc-300 font-sans mb-2 sm:mb-5 px-1">
+        {searchQuery?.trim() ? 'Resultados da busca' : 'Todos os Jogos'}
+      </h2>
 
-      {/*
-        Compact portrait cards (~5:7) so typical covers fill the tile.
-      */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-7 gap-2 sm:gap-2.5 lg:gap-3">
-        {visibleGames.map((game) => (
-          <Link
-            key={game.id}
-            to={gameDetailsPath(game.name)}
-            className="group cursor-pointer flex flex-col transition duration-300 transform-gpu hover:-translate-y-0.5 focus:outline-none"
-            aria-label={`Ver mídias de ${game.name}`}
-            title={game.name}
-          >
-            <div className="relative aspect-[5/7] w-full rounded-lg overflow-hidden bg-zinc-950 border border-zinc-800/80 group-hover:border-purple-500/50 shadow-sm group-hover:shadow-lg group-hover:shadow-purple-500/10 transition duration-300">
-              <LazyGameCover game={game} />
-            </div>
-          </Link>
+      <div className="flex flex-col divide-y divide-zinc-800/80 sm:grid sm:grid-cols-3 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-7 sm:gap-x-2.5 sm:gap-y-5 lg:gap-x-3 lg:gap-y-5 sm:divide-y-0">
+        {visibleGames.map((game, index) => (
+          <Reveal key={game.id} delay={revealDelay(index, ITEMS_PER_PAGE)} className="min-w-0">
+            <Link
+              to={gameDetailsPath(game.name)}
+              className="group cursor-pointer flex flex-row items-center gap-3 py-1.5 min-h-[52px] sm:min-h-0 sm:flex-col sm:items-stretch sm:gap-2 sm:py-0 transition duration-300 transform-gpu sm:hover:-translate-y-0.5 focus:outline-none"
+              aria-label={`Ver mídias de ${game.name}`}
+              title={game.name}
+            >
+              <div className="relative w-11 shrink-0 aspect-[5/7] sm:w-full rounded-lg overflow-hidden bg-zinc-950 border border-zinc-800/80 group-hover:border-purple-500/50 sm:shadow-sm sm:group-hover:shadow-lg sm:group-hover:shadow-purple-500/10 transition duration-300">
+                <LazyGameCover game={game} />
+              </div>
+              <p className="min-w-0 flex-1 sm:flex-none px-0.5 text-sm sm:text-xs font-medium text-zinc-200 sm:text-zinc-300 group-hover:text-white truncate leading-snug">
+                {game.name}
+              </p>
+              <ChevronRight
+                className="w-4 h-4 shrink-0 text-zinc-500 group-hover:text-zinc-300 sm:hidden"
+                aria-hidden="true"
+              />
+            </Link>
+          </Reveal>
         ))}
       </div>
 

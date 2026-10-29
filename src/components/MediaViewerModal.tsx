@@ -1,6 +1,8 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { motion } from 'motion/react';
 import { GameMedia } from '../types/game';
 import { videoUrlBesideThumb } from '../config/mediaConfig';
+import { overlayTransition } from '../motion';
 import {
   X,
   Download,
@@ -75,7 +77,13 @@ export const MediaViewerModal: React.FC<MediaViewerModalProps> = ({ media, onClo
   }, [onClose]);
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/90 backdrop-blur-md animate-fadeIn">
+    <motion.div
+      className="fixed inset-0 z-50 bg-black/90 backdrop-blur-md"
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      transition={overlayTransition}
+    >
       <div className="pointer-events-none absolute inset-x-0 top-0 z-20 flex items-center justify-between gap-3 bg-gradient-to-b from-black/70 to-transparent px-4 py-3">
         <div className="flex items-center gap-2 text-white bg-zinc-900/80 px-3 py-1.5 rounded-full border border-zinc-800 backdrop-blur-md pointer-events-auto">
           {media.type === 'video' ? (
@@ -110,23 +118,14 @@ export const MediaViewerModal: React.FC<MediaViewerModalProps> = ({ media, onClo
         </div>
       </div>
 
-      {media.type === 'screenshot' ? (
+      {media.type === 'screenshot' || media.type === 'artwork' ? (
         <ImageZoomViewer key={media.url} src={media.url} />
       ) : media.type === 'video' ? (
-        <div className="absolute inset-0 flex items-center justify-center p-4 sm:p-10">
-          <video
-            key={media.url}
-            src={videoUrlBesideThumb(media.url, media.thumbnailUrl, media.name)}
-            poster={media.thumbnailUrl}
-            controls
-            autoPlay
-            playsInline
-            preload="metadata"
-            className="max-h-full max-w-full rounded-xl bg-black shadow-2xl"
-          >
-            Seu navegador não suporta reprodução deste vídeo.
-          </video>
-        </div>
+        <VideoPlayback
+          key={media.url}
+          src={videoUrlBesideThumb(media.url, media.thumbnailUrl, media.name)}
+          poster={media.thumbnailUrl}
+        />
       ) : (
         <div className="absolute inset-0 flex items-center justify-center p-4">
           <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-8 text-center max-w-md text-zinc-200">
@@ -147,9 +146,108 @@ export const MediaViewerModal: React.FC<MediaViewerModalProps> = ({ media, onClo
           </div>
         </div>
       )}
-    </div>
+    </motion.div>
   );
 };
+
+function VideoPlayback({ src, poster }: { src: string; poster?: string }) {
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const startedRef = useRef(false);
+  const [loading, setLoading] = useState(true);
+  const [failed, setFailed] = useState(false);
+
+  const tryPlay = useCallback(async (video: HTMLVideoElement) => {
+    if (startedRef.current && !video.paused) return;
+
+    const attempt = async (muted: boolean) => {
+      video.muted = muted;
+      await video.play();
+    };
+
+    try {
+      await attempt(false);
+      startedRef.current = true;
+    } catch {
+      try {
+        await attempt(true);
+        video.muted = false;
+        startedRef.current = true;
+      } catch {
+        try {
+          await attempt(true);
+          startedRef.current = true;
+        } catch {
+          setFailed(true);
+          setLoading(false);
+        }
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+    startedRef.current = false;
+    setLoading(true);
+    setFailed(false);
+    void tryPlay(video);
+  }, [src, tryPlay]);
+
+  return (
+    <div className="absolute inset-0 flex items-center justify-center p-4 sm:p-10">
+      <div
+        className="relative w-full max-w-5xl aspect-video rounded-xl overflow-hidden bg-black shadow-2xl"
+        aria-busy={loading}
+      >
+        {loading && !failed && (
+          <div className="absolute inset-0 z-10 pointer-events-none" aria-hidden="true">
+            {poster ? (
+              <img
+                src={poster}
+                alt=""
+                className="absolute inset-0 w-full h-full object-cover opacity-35"
+              />
+            ) : null}
+            <div className="image-shimmer" />
+          </div>
+        )}
+        {failed && (
+          <p className="absolute inset-0 z-10 grid place-items-center px-6 text-center text-xs text-zinc-400">
+            Não foi possível reproduzir o vídeo.
+          </p>
+        )}
+        <video
+          ref={videoRef}
+          src={src}
+          poster={poster}
+          controls
+          autoPlay
+          playsInline
+          preload="auto"
+          onLoadStart={() => {
+            setFailed(false);
+            setLoading(true);
+          }}
+          onWaiting={() => setLoading(true)}
+          onPlaying={() => {
+            setLoading(false);
+            setFailed(false);
+          }}
+          onCanPlay={(event) => {
+            void tryPlay(event.currentTarget);
+          }}
+          onError={() => {
+            setFailed(true);
+            setLoading(false);
+          }}
+          className="w-full h-full object-contain bg-black"
+        >
+          Seu navegador não suporta reprodução deste vídeo.
+        </video>
+      </div>
+    </div>
+  );
+}
 
 function ImageZoomViewer({ src }: { src: string }) {
   const viewportRef = useRef<HTMLDivElement>(null);
@@ -168,6 +266,7 @@ function ImageZoomViewer({ src }: { src: string }) {
   const [loaded, setLoaded] = useState(false);
   const [panning, setPanning] = useState(false);
   const sizedRef = useRef(false);
+  const viewModeRef = useRef<'fit' | 'free'>('fit');
 
   const applyZoom = useCallback(
     (nextScale: number, originX: number, originY: number) => {
@@ -190,6 +289,7 @@ function ImageZoomViewer({ src }: { src: string }) {
         clamped,
       );
 
+      viewModeRef.current = 'free';
       setScale(clamped);
       setOffset(nextOffset);
     },
@@ -210,6 +310,7 @@ function ImageZoomViewer({ src }: { src: string }) {
     const viewport = viewportRef.current;
     if (!viewport || natural.w <= 0) return;
     const rect = viewport.getBoundingClientRect();
+    viewModeRef.current = 'free';
     setScale(1);
     setOffset(centeredOffset(rect.width, rect.height, natural.w, natural.h, 1));
   }, [natural.h, natural.w]);
@@ -219,6 +320,7 @@ function ImageZoomViewer({ src }: { src: string }) {
     if (!viewport || natural.w <= 0) return;
     const rect = viewport.getBoundingClientRect();
     const next = fitScale(rect.width, rect.height, natural.w, natural.h);
+    viewModeRef.current = 'fit';
     setScale(next);
     setOffset(centeredOffset(rect.width, rect.height, natural.w, natural.h, next));
   }, [natural.h, natural.w]);
@@ -258,6 +360,22 @@ function ImageZoomViewer({ src }: { src: string }) {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [setActualSize, setFit, zoomBy]);
 
+  useEffect(() => {
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+
+    const observer = new ResizeObserver(() => {
+      if (viewModeRef.current !== 'fit' || natural.w <= 0) return;
+      const rect = viewport.getBoundingClientRect();
+      const next = fitScale(rect.width, rect.height, natural.w, natural.h);
+      setScale(next);
+      setOffset(centeredOffset(rect.width, rect.height, natural.w, natural.h, next));
+    });
+
+    observer.observe(viewport);
+    return () => observer.disconnect();
+  }, [natural.h, natural.w]);
+
   const applyImageSize = useCallback((image: HTMLImageElement) => {
     const width = image.naturalWidth;
     const height = image.naturalHeight;
@@ -266,13 +384,15 @@ function ImageZoomViewer({ src }: { src: string }) {
     const viewport = viewportRef.current;
     setNatural({ w: width, h: height });
     setLoaded(true);
+    viewModeRef.current = 'fit';
     if (!viewport) {
       setScale(1);
       return;
     }
     const rect = viewport.getBoundingClientRect();
-    setScale(1);
-    setOffset(centeredOffset(rect.width, rect.height, width, height, 1));
+    const next = fitScale(rect.width, rect.height, width, height);
+    setScale(next);
+    setOffset(centeredOffset(rect.width, rect.height, width, height, next));
   }, []);
 
   function onPointerDown(event: React.PointerEvent<HTMLDivElement>) {
@@ -348,6 +468,12 @@ function ImageZoomViewer({ src }: { src: string }) {
 
   const percent = Math.round(scale * 100);
   const atActual = Math.abs(scale - 1) < 0.02;
+  const viewportRect = viewportRef.current?.getBoundingClientRect();
+  const fitValue =
+    viewportRect && natural.w > 0
+      ? fitScale(viewportRect.width, viewportRect.height, natural.w, natural.h)
+      : 1;
+  const atFit = Math.abs(scale - fitValue) < 0.02;
 
   return (
     <div className="absolute inset-0 flex flex-col">
@@ -434,8 +560,13 @@ function ImageZoomViewer({ src }: { src: string }) {
         </button>
         <button
           type="button"
-          className="inline-flex items-center gap-1.5 px-3 py-2 rounded-full border border-zinc-800 bg-zinc-900/80 text-xs text-zinc-300 hover:text-white transition cursor-pointer"
+          className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-full border text-xs font-medium transition cursor-pointer ${
+            atFit && !atActual
+              ? 'border-purple-500/70 bg-purple-600/80 text-white'
+              : 'border-zinc-800 bg-zinc-900/80 text-zinc-300 hover:text-white'
+          }`}
           title="Ajustar à janela"
+          aria-pressed={atFit && !atActual}
           onClick={setFit}
         >
           <Maximize2 className="w-3.5 h-3.5" />

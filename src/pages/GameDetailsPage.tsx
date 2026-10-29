@@ -1,9 +1,11 @@
 import React from 'react';
+import { motion } from 'motion/react';
 import { Link, useParams } from 'react-router-dom';
 import { GameDetails } from '../components/GameDetails';
 import { useFrozenRoute } from '../components/CachedOutlet';
 import { findGameByName, useLibrary } from '../libraryContext';
 import { Gamepad2 } from 'lucide-react';
+import { pageTransition } from '../motion';
 
 export const GameDetailsPage: React.FC = () => {
   const { games, isSyncing } = useLibrary();
@@ -19,16 +21,26 @@ export const GameDetailsPage: React.FC = () => {
 
   if (isSyncing && !selectedGame) {
     return (
-      <div className="py-24 text-center">
+      <motion.div
+        className="py-24 text-center"
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={pageTransition}
+      >
         <div className="inline-block w-8 h-8 border-2 border-purple-500 border-t-transparent rounded-full animate-spin mb-3" />
         <p className="text-xs text-zinc-400">Carregando informações do jogo...</p>
-      </div>
+      </motion.div>
     );
   }
 
   if (!selectedGame) {
     return (
-      <div className="py-20 text-center max-w-md mx-auto">
+      <motion.div
+        className="py-20 text-center max-w-md mx-auto"
+        initial={{ opacity: 0, y: 12 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={pageTransition}
+      >
         <div className="w-16 h-16 mx-auto rounded-2xl bg-zinc-900 border border-zinc-800 flex items-center justify-center text-zinc-500 mb-4">
           <Gamepad2 className="w-8 h-8" />
         </div>
@@ -42,7 +54,7 @@ export const GameDetailsPage: React.FC = () => {
         >
           Voltar à biblioteca
         </Link>
-      </div>
+      </motion.div>
     );
   }
 

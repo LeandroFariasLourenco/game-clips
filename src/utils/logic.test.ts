@@ -41,6 +41,12 @@ import {
   pickFeaturedItems,
   remainingMs,
 } from './featuredRotation';
+import {
+  DAILY_FEATURED_COUNT,
+  DAILY_FEATURED_STORAGE_KEY,
+  getOrCreateDailyFeaturedGames,
+  gamesWithoutFeatured,
+} from './dailyFeaturedGames';
 
 test('verifyUserAccess allows authorized owner email and rejects others', () => {
   const allowed = verifyUserAccess(DEFAULT_OWNER_EMAIL);
@@ -390,4 +396,42 @@ test('route cache keys keep home stable and details keyed by game name', () => {
   assert.equal(gameDetailsCacheKey(games[1]), 'FIFA 15');
   assert.equal(findGameByName(games, 'FIFA 15')?.name, 'FIFA 15');
   assert.equal(resolveRouteCacheKey('/missing', 'missing', games), null);
+});
+
+test('daily featured games persist for the local day and are hidden from the listing', () => {
+  const catalog: Game[] = Array.from({ length: 6 }, (_, index) => ({
+    id: `game-${index}`,
+    name: `Game ${index}`,
+    playTimeMinutes: 0,
+    subfolderName: `Game ${index}`,
+  }));
+  const storage = memoryStorage();
+  const day = new Date('2026-10-29T12:00:00');
+  const nextDay = new Date('2026-10-30T08:00:00');
+
+  const first = getOrCreateDailyFeaturedGames(catalog, storage, day, () => 0.2);
+  assert.equal(first.length, DAILY_FEATURED_COUNT);
+  assert.equal(new Set(first.map((game) => game.id)).size, DAILY_FEATURED_COUNT);
+  assert.ok(storage.getItem(DAILY_FEATURED_STORAGE_KEY)?.includes('2026-10-29'));
+
+  const reused = getOrCreateDailyFeaturedGames(catalog, storage, day, () => 0.9);
+  assert.deepEqual(
+    reused.map((game) => game.id),
+    first.map((game) => game.id)
+  );
+
+  const rotated = getOrCreateDailyFeaturedGames(catalog, storage, nextDay, () => 0.8);
+  assert.equal(rotated.length, DAILY_FEATURED_COUNT);
+  assert.notDeepEqual(
+    rotated.map((game) => game.id),
+    first.map((game) => game.id)
+  );
+
+  const listing = gamesWithoutFeatured(catalog, first);
+  assert.equal(listing.length, catalog.length - DAILY_FEATURED_COUNT);
+  assert.equal(listing.some((game) => first.some((featured) => featured.id === game.id)), false);
+
+  const searchHits = catalog.filter((game) => game.name === first[0].name);
+  assert.equal(searchHits.length, 1);
+  assert.equal(searchHits[0].id, first[0].id);
 });

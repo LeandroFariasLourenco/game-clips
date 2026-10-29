@@ -1,7 +1,14 @@
-import React, { createContext, useContext, useMemo, useRef } from 'react';
+import React, { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { motion } from 'motion/react';
 import { useLocation, useOutlet, useParams } from 'react-router-dom';
 import { Game } from '../types/game';
-import { findGameByName, resolveRouteCacheKey, useLibrary } from '../libraryContext';
+import {
+  findGameByName,
+  HOME_CACHE_KEY,
+  resolveRouteCacheKey,
+  useLibrary,
+} from '../libraryContext';
+import { pageTransition } from '../motion';
 
 interface FrozenRoute {
   cacheKey: string;
@@ -44,23 +51,63 @@ export function CachedOutlet() {
   const showLiveOutlet = Boolean(outlet) && (!canCache || !activeKey || !cacheRef.current.has(activeKey));
 
   return (
-    <>
-      {cachedPages.map(([cacheKey, node]) => {
-        const isActive = cacheKey === activeKey;
-        return (
-          <div
-            key={cacheKey}
-            hidden={!isActive}
-            inert={!isActive}
-            aria-hidden={!isActive}
-            data-route-cache={cacheKey}
-          >
-            {node}
-          </div>
-        );
-      })}
+    <div className="relative">
+      {cachedPages.map(([cacheKey, node]) => (
+        <CachedRouteFrame
+          key={cacheKey}
+          cacheKey={cacheKey}
+          isActive={cacheKey === activeKey}
+        >
+          {node}
+        </CachedRouteFrame>
+      ))}
       {showLiveOutlet && (isGameRoute || isHome) ? outlet : null}
       {!isHome && !isGameRoute ? outlet : null}
-    </>
+    </div>
+  );
+}
+
+function CachedRouteFrame({
+  cacheKey,
+  isActive,
+  children,
+}: {
+  cacheKey: string;
+  isActive: boolean;
+  children: React.ReactNode;
+}) {
+  const [visible, setVisible] = useState(isActive);
+  const exitX = cacheKey === HOME_CACHE_KEY ? -28 : 32;
+
+  useEffect(() => {
+    if (isActive) setVisible(true);
+  }, [isActive]);
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 14 }}
+      animate={
+        isActive
+          ? { opacity: 1, x: 0, y: 0 }
+          : { opacity: 0, x: exitX, y: 0 }
+      }
+      transition={pageTransition}
+      onAnimationComplete={() => {
+        if (!isActive) setVisible(false);
+      }}
+      className={
+        isActive
+          ? 'relative z-[1]'
+          : visible
+            ? 'absolute inset-0 z-0 overflow-hidden'
+            : 'hidden'
+      }
+      style={{ pointerEvents: isActive ? 'auto' : 'none' }}
+      inert={!isActive || undefined}
+      aria-hidden={!isActive}
+      data-route-cache={cacheKey}
+    >
+      {children}
+    </motion.div>
   );
 }

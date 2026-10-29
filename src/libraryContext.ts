@@ -5,6 +5,7 @@ export interface LibraryOutletContext {
   games: Game[];
   filteredGames: Game[];
   searchQuery: string;
+  onSearchChange: (query: string) => void;
   isSyncing: boolean;
   onRefreshLocal: () => void;
 }
