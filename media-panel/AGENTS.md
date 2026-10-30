@@ -60,7 +60,11 @@ Regenerar no S3:
 
 Capa, banner e ícone **não** entram no JSON. Clips soltos em `videos/*.mp4` não entram até estarem em `videos/<nome>/<nome>.mp4`.
 
+Renomear jogo: botão direito na lista da esquerda → **Renomear**. Move a pasta no bucket (`PATCH /api/games/:nome` `{ name }` ou comando `rename_game`), atualiza o rótulo `Jogo` nos nomes padronizados `YYYY-MM-DDTHHmmssZ_Jogo#n` e regenera `metadata.json`. Cópia S3 com `MetadataDirective=COPY`.
+
 Remoção de jogo: botão direito na lista da esquerda. Só é permitido sem screenshots nem clips. Remoção de screenshot/clip: botão direito na linha da listagem (não há ícone de lixeira visível). Em seguida `DELETE /api/games/:nome/file?key=…` ou comando `delete_media`. Só aceita keys em `images/` ou `videos/`. Clip em pasta apaga a pasta inteira (`mp4` + `thumb.jpg`). Depois o painel regenera `metadata.json`. **Nunca** apague pelo frontend sem a janela de confirmação.
+
+Alterar data de screenshot/clip: botão direito → **Alterar data**. Atualiza só o prefixo `YYYY-MM-DDTHHmmssZ` no nome (e a pasta do clip). Cópia S3 com `MetadataDirective=COPY` — não reescreve metadata do objeto. `PATCH /api/games/:nome/file` `{ key, date }` ou comando `update_media_date`. Depois o painel regenera `metadata.json` por causa das URLs novas.
 
 A listagem de imagens e vídeos mostra a inserção a partir do `LastModified` do objeto no S3. A data original do arquivo fica no nome (`YYYY-MM-DDTHHmmssZ_Jogo#n`, UTC a partir da coluna Data do Explorer).
 
@@ -98,7 +102,8 @@ Catálogo e detalhes em `media-panel/.cache/` com TTL indefinido. S3 de novo só
 cd media-panel
 npm run dev          # UI no browser + API Node
 npm run tauri dev    # janela 1024×768
+npm run build:exe    # binário Tauri + instaladores
 npm run list:games   # pastas da raiz do bucket
 ```
 
-Na raiz do repo: `npm run panel:dev`.
+Na raiz do repo: `npm run panel:dev` e `npm run panel:build`. O executável fica em `src-tauri/target/release/`; os instaladores em `src-tauri/target/release/bundle/`.

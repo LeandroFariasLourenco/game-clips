@@ -1,5 +1,5 @@
 {
-  "name": "Biblioteca de Jogos",
+  "name": "Game clips",
   "description": "PWA 100% Client-Side para gerenciamento, visualização e armazenamento de mídias de jogos sincronizado com Google Drive e Dexie IndexedDB.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]

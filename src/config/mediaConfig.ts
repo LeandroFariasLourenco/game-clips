@@ -104,20 +104,36 @@ export function videoFileNameFromUrl(pathOrUrl: string): string {
   }
 }
 
+/** Clip filenames use `Jogo#n`; a raw `#` would be treated as a URL hash and break playback. */
+export function sanitizeVideoSrc(raw: string): string {
+  if (!raw) return raw;
+  const href = /#t=/i.test(raw) ? raw : raw.replace(/#/g, '%23');
+  try {
+    const url = new URL(href);
+    url.pathname = url.pathname
+      .split('/')
+      .map((segment) => encodeURIComponent(decodeURIComponent(segment)))
+      .join('/');
+    return url.href;
+  } catch {
+    return href;
+  }
+}
+
 /** Clip mp4 lives beside thumb.jpg: videos/<clip>/<clip>.mp4 */
 export function videoUrlBesideThumb(
   videoUrl: string,
   thumbnailUrl?: string,
   fileName?: string,
 ): string {
-  if (!thumbnailUrl) return videoUrl;
+  if (!thumbnailUrl) return sanitizeVideoSrc(videoUrl);
 
   try {
     const thumb = new URL(thumbnailUrl);
     const segments = thumb.pathname.split('/').filter(Boolean);
     const thumbName = decodeURIComponent(segments[segments.length - 1] || '');
     if (thumbName.toLowerCase() !== VIDEO_THUMB_FILE || segments.length < 2) {
-      return videoUrl;
+      return sanitizeVideoSrc(videoUrl);
     }
 
     const folder = decodeURIComponent(segments[segments.length - 2] || '');
@@ -125,13 +141,13 @@ export function videoUrlBesideThumb(
     const fromVideo = videoFileNameFromUrl(videoUrl);
     const playbackName =
       listed || (VIDEO_FILE_RE.test(fromVideo) ? fromVideo : '') || (folder ? `${folder}.mp4` : '');
-    if (!playbackName) return videoUrl;
+    if (!playbackName) return sanitizeVideoSrc(videoUrl);
 
     segments[segments.length - 1] = encodeURIComponent(playbackName);
     thumb.pathname = `/${segments.join('/')}`;
-    return thumb.toString();
+    return sanitizeVideoSrc(thumb.toString());
   } catch {
-    return videoUrl;
+    return sanitizeVideoSrc(videoUrl);
   }
 }
 

@@ -1,9 +1,11 @@
 import React, { useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
-import { Navigation } from 'swiper/modules';
+import { Autoplay, Navigation } from 'swiper/modules';
 import { Swiper, SwiperSlide } from 'swiper/react';
+import type { Swiper as SwiperInstance } from 'swiper';
 import { Film, Image as ImageIcon, Play } from 'lucide-react';
 import { GameMedia } from '../types/game';
+import { sanitizeVideoSrc } from '../config/mediaConfig';
 import { FeaturedHighlight } from '../utils/featuredMedia';
 import { ShimmerImage } from '../directives/ShimmerImage';
 import { MediaViewerModal } from './MediaViewerModal';
@@ -15,10 +17,47 @@ interface FeaturedMediaReelsProps {
   items: FeaturedHighlight[];
 }
 
+function isActiveReelVideo(video: HTMLVideoElement) {
+  return Boolean(video.closest('.swiper-slide-active'));
+}
+
+function playReelVideo(video: HTMLVideoElement) {
+  video.muted = true;
+  video.defaultMuted = true;
+  video.volume = 0;
+  void video
+    .play()
+    .then(() => {
+      if (!isActiveReelVideo(video)) {
+        video.pause();
+        video.currentTime = 0;
+      }
+    })
+    .catch(() => {});
+}
+
+function pauseReelVideo(video: HTMLVideoElement) {
+  video.pause();
+  if (video.currentTime > 0) video.currentTime = 0;
+}
+
+function syncActiveReelMedia(swiper: SwiperInstance) {
+  const videos = swiper.el.querySelectorAll<HTMLVideoElement>('video.reel-video');
+  videos.forEach((video) => {
+    if (isActiveReelVideo(video)) {
+      playReelVideo(video);
+      return;
+    }
+    pauseReelVideo(video);
+  });
+}
+
 export const FeaturedMediaReels: React.FC<FeaturedMediaReelsProps> = ({ items }) => {
   const [selected, setSelected] = useState<GameMedia | null>(null);
 
   if (items.length === 0) return null;
+
+  const canLoop = items.length > 2;
 
   return (
     <motion.section
@@ -35,12 +74,18 @@ export const FeaturedMediaReels: React.FC<FeaturedMediaReelsProps> = ({ items })
       </div>
 
       <Swiper
-        modules={[Navigation]}
-        slidesPerView={1.18}
-        spaceBetween={12}
+        modules={[Autoplay, Navigation]}
+        slidesPerView={2.15}
+        spaceBetween={10}
         centeredSlides
         centerInsufficientSlides
         watchOverflow
+        loop={canLoop}
+        autoplay={
+          items.length > 1
+            ? { delay: 6500, disableOnInteraction: false, pauseOnMouseEnter: true }
+            : false
+        }
         navigation={{ enabled: false }}
         breakpoints={{
           768: {
@@ -62,6 +107,9 @@ export const FeaturedMediaReels: React.FC<FeaturedMediaReelsProps> = ({ items })
             navigation: { enabled: true },
           },
         }}
+        onSwiper={syncActiveReelMedia}
+        onSlideChange={syncActiveReelMedia}
+        onSlideChangeTransitionEnd={syncActiveReelMedia}
         a11y={{
           containerMessage: 'Carrossel de mídias em destaque',
           prevSlideMessage: 'Mídia anterior',
@@ -108,10 +156,25 @@ const ReelCard: React.FC<{
           alt=""
           draggable={false}
           wrapperClassName="absolute inset-0"
-          className="h-full w-full object-cover transition duration-500 group-hover:scale-[1.03]"
+          className="reel-kenburns h-full w-full object-cover"
         />
       ) : (
         <div className="absolute inset-0 bg-zinc-900" />
+      )}
+
+      {isVideo && item.media.url && (
+        <video
+          src={sanitizeVideoSrc(item.media.url)}
+          poster={preview}
+          muted
+          loop
+          playsInline
+          preload="auto"
+          onCanPlay={(event) => {
+            if (isActiveReelVideo(event.currentTarget)) playReelVideo(event.currentTarget);
+          }}
+          className="reel-video reel-kenburns absolute inset-0 h-full w-full object-cover transition-opacity duration-500"
+        />
       )}
 
       <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/85 via-black/5 to-black/25" />
@@ -122,17 +185,24 @@ const ReelCard: React.FC<{
       </span>
 
       {isVideo && (
-        <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-          <div className="flex h-12 w-12 items-center justify-center rounded-full border border-white/25 bg-black/55 text-white shadow-lg backdrop-blur-sm transition duration-300 group-hover:scale-110 group-hover:border-purple-300 group-hover:bg-purple-600/90">
+        <div className="reel-play-hint pointer-events-none absolute inset-0 flex items-center justify-center">
+          <div className="flex h-12 w-12 items-center justify-center rounded-full border border-white/25 bg-black/55 text-white shadow-lg backdrop-blur-sm">
             <Play className="ml-0.5 h-5 w-5 fill-white" />
           </div>
         </div>
       )}
 
       <div className="absolute inset-x-0 bottom-0 z-10 p-3">
-        <p className="truncate text-sm font-semibold text-white drop-shadow-[0_2px_8px_rgba(0,0,0,0.85)]">
-          {item.gameName}
-        </p>
+        <div className="flex items-center gap-2 min-w-0">
+          {item.gameIcon ? (
+            <span className="reel-game-icon h-7 w-7 shrink-0 overflow-hidden rounded-md border border-white/20 bg-black/50 shadow-lg">
+              <img src={item.gameIcon} alt="" className="h-full w-full object-cover" />
+            </span>
+          ) : null}
+          <p className="truncate text-sm font-semibold text-white drop-shadow-[0_2px_8px_rgba(0,0,0,0.85)]">
+            {item.gameName}
+          </p>
+        </div>
       </div>
     </button>
   );

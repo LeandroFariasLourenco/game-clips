@@ -1151,6 +1151,7 @@ button:disabled {
   animation: details-rise 0.16s ease both;
 }
 
+.file-context-item,
 .file-context-delete {
   display: flex;
   width: 100%;
@@ -1164,8 +1165,34 @@ button:disabled {
   cursor: pointer;
 }
 
+.file-context-item {
+  color: var(--color-text-secondary);
+}
+
+.file-context-item:hover:not(:disabled) {
+  background: var(--color-surface-hover);
+  color: var(--color-text);
+}
+
 .file-context-delete:hover:not(:disabled) {
   background: var(--color-danger-soft);
+}
+
+.rename-preview {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  min-width: 0;
+}
+
+.rename-preview code {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+input[type="datetime-local"].search {
+  color-scheme: dark;
 }
 
 .confirm-modal {

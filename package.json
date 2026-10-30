@@ -12,6 +12,7 @@
     "lint": "tsc --noEmit",
     "deploy:media": "node scripts/deploy-media-s3.cjs",
     "panel:dev": "npm --prefix media-panel run tauri -- dev",
+    "panel:build": "npm --prefix media-panel run build:exe",
     "media:names": "node scripts/prepare-media-names.cjs",
     "media:folders": "node scripts/prepare-media-video-folders.cjs",
     "media:thumbs": "node scripts/prepare-media-thumbs.cjs",

@@ -8,12 +8,14 @@ import {
   HttpError,
   createGame,
   deleteGame,
+  renameGame,
   deleteMediaFile,
   getAsset,
   getGame,
   getGameMetadata,
   listGames,
   refreshGameMetadata,
+  updateMediaDate,
   uploadMedia,
 } from "./server/s3.ts";
 import {
@@ -94,13 +96,20 @@ function s3ApiPlugin(): Plugin {
           }
 
           const fileMatch = url.pathname.match(/^\/api\/games\/([^/]+)\/file$/);
-          if (req.method === "DELETE" && fileMatch) {
-            sendJson(
-              res,
-              200,
-              await deleteMediaFile(decodeURIComponent(fileMatch[1]), url.searchParams.get("key") || ""),
-            );
-            return;
+          if (fileMatch) {
+            const gameName = decodeURIComponent(fileMatch[1]);
+            if (req.method === "DELETE") {
+              sendJson(res, 200, await deleteMediaFile(gameName, url.searchParams.get("key") || ""));
+              return;
+            }
+            if (req.method === "PATCH") {
+              const payload = JSON.parse((await readBody(req)).toString("utf8") || "{}") as {
+                key?: string;
+                date?: string;
+              };
+              sendJson(res, 200, await updateMediaDate(gameName, payload.key || "", payload.date || ""));
+              return;
+            }
           }
 
           const gameMatch = url.pathname.match(/^\/api\/games\/([^/]+)$/);
@@ -138,6 +147,18 @@ function s3ApiPlugin(): Plugin {
           if (req.method === "DELETE" && gameMatch) {
             await deleteGame(decodeURIComponent(gameMatch[1]));
             sendJson(res, 200, { ok: true });
+            return;
+          }
+
+          if (req.method === "PATCH" && gameMatch) {
+            const payload = JSON.parse((await readBody(req)).toString("utf8") || "{}") as {
+              name?: string;
+            };
+            sendJson(
+              res,
+              200,
+              await renameGame(decodeURIComponent(gameMatch[1]), payload.name || ""),
+            );
             return;
           }
 

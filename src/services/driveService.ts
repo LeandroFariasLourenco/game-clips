@@ -13,6 +13,7 @@ import {
 import { clearGamesCache, readCachedText, storeCachedResponse } from './gamesCache';
 import { clearMediaCache } from './mediaCache';
 import { FEATURED_STORAGE_KEY } from '../utils/featuredRotation';
+import { sortMediaNewestFirst } from '../utils/mediaSort';
 
 export const MASTER_FILE_NAME = GAMES_MANIFEST_FILE;
 
@@ -42,31 +43,35 @@ export interface WorkerListedFile {
 }
 
 export function mapListedImagesToMedia(game: Game, files: WorkerListedFile[]): GameMedia[] {
-  return files.map((file) => ({
-    id: `image-${game.id}-${file.relativePath}`,
-    gameId: game.id,
-    name: file.name,
-    type: 'screenshot',
-    mimeType: file.mimeType || 'image/jpeg',
-    size: Number(file.size || 0),
-    url: file.url,
-    thumbnailUrl: file.url,
-    createdTime: file.createdTime,
-  }));
+  return sortMediaNewestFirst(
+    files.map((file) => ({
+      id: `image-${game.id}-${file.relativePath}`,
+      gameId: game.id,
+      name: file.name,
+      type: 'screenshot' as const,
+      mimeType: file.mimeType || 'image/jpeg',
+      size: Number(file.size || 0),
+      url: file.url,
+      thumbnailUrl: file.url,
+      createdTime: file.createdTime,
+    })),
+  );
 }
 
 export function mapListedVideosToMedia(game: Game, files: WorkerListedFile[]): GameMedia[] {
-  return files.map((file) => ({
-    id: `video-${game.id}-${file.relativePath}`,
-    gameId: game.id,
-    name: file.name,
-    type: 'video',
-    mimeType: file.mimeType || 'video/mp4',
-    size: Number(file.size || 0),
-    url: videoUrlBesideThumb(file.url, file.thumbnailUrl, file.name),
-    thumbnailUrl: file.thumbnailUrl,
-    createdTime: file.createdTime,
-  }));
+  return sortMediaNewestFirst(
+    files.map((file) => ({
+      id: `video-${game.id}-${file.relativePath}`,
+      gameId: game.id,
+      name: file.name,
+      type: 'video' as const,
+      mimeType: file.mimeType || 'video/mp4',
+      size: Number(file.size || 0),
+      url: videoUrlBesideThumb(file.url, file.thumbnailUrl, file.name),
+      thumbnailUrl: file.thumbnailUrl,
+      createdTime: file.createdTime,
+    })),
+  );
 }
 
 class RemoteLibraryService {

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Game } from '../types/game';
 import { getGameMetadataUrl } from '../config/mediaConfig';
+import { driveAssetService } from '../services/driveAssetService';
 import { getGameFolderName } from '../services/driveService';
 import { collectGameMediaCacheUrls, warmMediaCache } from '../services/mediaCache';
 import { localDateKey } from '../utils/dailyFeaturedGames';
@@ -50,6 +51,7 @@ export function useFeaturedMedia(games: Game[]): {
               (media) => ({
                 gameId: game.id,
                 gameName: game.name,
+                gameIcon: driveAssetService.getGameIcon(game),
                 media,
               }),
             );

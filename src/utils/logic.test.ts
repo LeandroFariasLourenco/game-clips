@@ -16,6 +16,7 @@ import {
   matchBrandingAsset,
   resolveMediaBaseUrl,
   resolveMediaWorkerUrl,
+  sanitizeVideoSrc,
   videoUrlBesideThumb,
 } from '../config/mediaConfig';
 import { isMediaAssetUrl } from '../services/mediaAssetUrl';
@@ -29,6 +30,7 @@ import {
 } from '../libraryContext';
 import { localAssetService } from '../services/driveAssetService';
 import { mapListedImagesToMedia, mapListedVideosToMedia } from '../services/driveService';
+import { parseMediaCapturedAt } from './mediaSort';
 import {
   FEATURED_COUNT,
   FEATURED_ROTATION_MS,
@@ -342,6 +344,46 @@ test('media URLs always point to the public bucket', () => {
       url: `${DEFAULT_MEDIA_WORKER_URL}/Battlefield%206/images/shot.png`,
     },
   ]);
+  const datedImages = mapListedImagesToMedia(battlefield, [
+    {
+      name: '2026-02-28T132540Z_Battlefield 6#1.jpg',
+      relativePath: 'images/2026-02-28T132540Z_Battlefield 6#1.jpg',
+      size: 1,
+      mimeType: 'image/jpeg',
+      url: `${DEFAULT_MEDIA_WORKER_URL}/Battlefield%206/images/old.jpg`,
+    },
+    {
+      name: '2026-10-18T004908Z_Battlefield 6#2.jpg',
+      relativePath: 'images/2026-10-18T004908Z_Battlefield 6#2.jpg',
+      size: 1,
+      mimeType: 'image/jpeg',
+      url: `${DEFAULT_MEDIA_WORKER_URL}/Battlefield%206/images/new.jpg`,
+    },
+    {
+      name: '2026-10-18T004908Z_Battlefield 6#1.jpg',
+      relativePath: 'images/2026-10-18T004908Z_Battlefield 6#1.jpg',
+      size: 1,
+      mimeType: 'image/jpeg',
+      url: `${DEFAULT_MEDIA_WORKER_URL}/Battlefield%206/images/mid.jpg`,
+    },
+  ]);
+  assert.deepEqual(
+    datedImages.map((item) => item.name),
+    [
+      '2026-10-18T004908Z_Battlefield 6#2.jpg',
+      '2026-10-18T004908Z_Battlefield 6#1.jpg',
+      '2026-02-28T132540Z_Battlefield 6#1.jpg',
+    ],
+  );
+  assert.equal(
+    parseMediaCapturedAt('2026-02-28T132540Z_Battlefield 6#1.jpg')?.toISOString(),
+    '2026-02-28T13:25:40.000Z',
+  );
+  assert.equal(
+    parseMediaCapturedAt('legacy.png', '2026-01-02T03:04:05.000Z')?.toISOString(),
+    '2026-01-02T03:04:05.000Z',
+  );
+
   assert.equal(images.length, 1);
   assert.equal(images[0].type, 'screenshot');
   assert.equal(images[0].url, `${DEFAULT_MEDIA_WORKER_URL}/Battlefield%206/images/shot.png`);
@@ -353,6 +395,29 @@ test('media URLs always point to the public bucket', () => {
   );
   const videos = mapListedVideosToMedia(battlefield, [
     {
+      name: '2026-03-09T114754Z_Battlefield 6#1.mp4',
+      relativePath: 'videos/2026-03-09T114754Z_Battlefield 6#1/2026-03-09T114754Z_Battlefield 6#1.mp4',
+      size: 2,
+      mimeType: 'video/mp4',
+      url: `${DEFAULT_MEDIA_WORKER_URL}/Battlefield%206/videos/new.mp4`,
+      thumbnailUrl: `${DEFAULT_MEDIA_WORKER_URL}/Battlefield%206/videos/2026-03-09T114754Z_Battlefield%206%231/thumb.jpg`,
+    },
+    {
+      name: '2026-02-28T132540Z_Battlefield 6#1.mp4',
+      relativePath: 'videos/2026-02-28T132540Z_Battlefield 6#1/2026-02-28T132540Z_Battlefield 6#1.mp4',
+      size: 2,
+      mimeType: 'video/mp4',
+      url: `${DEFAULT_MEDIA_WORKER_URL}/Battlefield%206/videos/old.mp4`,
+      thumbnailUrl: `${DEFAULT_MEDIA_WORKER_URL}/Battlefield%206/videos/2026-02-28T132540Z_Battlefield%206%231/thumb.jpg`,
+    },
+  ]);
+  assert.deepEqual(
+    videos.map((item) => item.name),
+    ['2026-03-09T114754Z_Battlefield 6#1.mp4', '2026-02-28T132540Z_Battlefield 6#1.mp4'],
+  );
+
+  const legacyVideo = mapListedVideosToMedia(battlefield, [
+    {
       name: 'ClipedeMomentsdeOct102026 (5).mp4',
       relativePath: 'videos/ClipedeMomentsdeOct102026 (5)/ClipedeMomentsdeOct102026 (5).mp4',
       size: 451293402,
@@ -361,14 +426,14 @@ test('media URLs always point to the public bucket', () => {
       thumbnailUrl: `${DEFAULT_MEDIA_WORKER_URL}/Battlefield%206/videos/ClipedeMomentsdeOct102026%20(5)/thumb.jpg`,
     },
   ]);
-  assert.equal(videos.length, 1);
-  assert.equal(videos[0].type, 'video');
+  assert.equal(legacyVideo.length, 1);
+  assert.equal(legacyVideo[0].type, 'video');
   assert.equal(
-    videos[0].thumbnailUrl,
+    legacyVideo[0].thumbnailUrl,
     `${DEFAULT_MEDIA_WORKER_URL}/Battlefield%206/videos/ClipedeMomentsdeOct102026%20(5)/thumb.jpg`
   );
   assert.equal(
-    videos[0].url,
+    legacyVideo[0].url,
     `${DEFAULT_MEDIA_WORKER_URL}/Battlefield%206/videos/ClipedeMomentsdeOct102026%20(5)/ClipedeMomentsdeOct102026%20(5).mp4`
   );
   assert.equal(
@@ -378,6 +443,24 @@ test('media URLs always point to the public bucket', () => {
       'clip.mp4',
     ),
     `${DEFAULT_MEDIA_WORKER_URL}/FIFA%2015/videos/clip/clip.mp4`
+  );
+  const hashed =
+    `${DEFAULT_MEDIA_WORKER_URL}/Aliens%20Dark%20Descent/videos/` +
+    '2026-02-28T132540Z_Aliens Dark Descent#1/2026-02-28T132540Z_Aliens Dark Descent#1.mp4';
+  assert.equal(
+    sanitizeVideoSrc(hashed),
+    `${DEFAULT_MEDIA_WORKER_URL}/Aliens%20Dark%20Descent/videos/` +
+      '2026-02-28T132540Z_Aliens%20Dark%20Descent%231/2026-02-28T132540Z_Aliens%20Dark%20Descent%231.mp4',
+  );
+  assert.equal(
+    videoUrlBesideThumb(
+      hashed,
+      `${DEFAULT_MEDIA_WORKER_URL}/Aliens%20Dark%20Descent/videos/` +
+        '2026-02-28T132540Z_Aliens%20Dark%20Descent%231/thumb.jpg',
+      '2026-02-28T132540Z_Aliens Dark Descent#1.mp4',
+    ),
+    `${DEFAULT_MEDIA_WORKER_URL}/Aliens%20Dark%20Descent/videos/` +
+      '2026-02-28T132540Z_Aliens%20Dark%20Descent%231/2026-02-28T132540Z_Aliens%20Dark%20Descent%231.mp4',
   );
 });
 

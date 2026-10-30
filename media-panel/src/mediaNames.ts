@@ -140,6 +140,44 @@ export function standardizedMediaName(
   );
 }
 
+export function mediaStemFromFileName(fileName: string): string {
+  return splitName(fileName).stem;
+}
+
+export function relabelMediaFileName(currentName: string, fromGame: string, toGame: string): string {
+  const parsed = parseStandardizedMediaName(currentName);
+  if (!parsed || parsed.game !== mediaFileLabel(fromGame)) return currentName;
+  const { ext } = splitName(currentName);
+  return buildStandardizedMediaName(parsed.date, toGame, parsed.sequence, ext);
+}
+
+/** Nova data no prefixo UTC; mantém jogo e sequência do nome atual quando já padronizado. */
+export function datedMediaFileName(
+  currentName: string,
+  date: Date,
+  gameName: string,
+  reserved: Iterable<string> = [],
+): string {
+  if (Number.isNaN(date.getTime())) {
+    throw new Error("Data inválida.");
+  }
+  const { ext } = splitName(currentName);
+  const parsed = parseStandardizedMediaName(currentName);
+  const sequence = parsed?.sequence ?? nextSequence(usedMediaSequences(reserved, gameName));
+  const stamp = formatUtcStamp(date);
+  const label = parsed?.game ?? mediaFileLabel(gameName);
+  const suffix = ext ? `.${ext}` : "";
+  return `${stamp}_${label}#${sequence}${suffix}`;
+}
+
+export function toDatetimeLocalValue(date: Date): string {
+  const pad = (n: number) => pad2(n);
+  return (
+    `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}` +
+    `T${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`
+  );
+}
+
 export function uniqueMediaNames(names: string[], reserved: Iterable<string> = []): string[] {
   const used = new Set(Array.from(reserved, (name) => name.toLowerCase()));
   return names.map((name) => {

@@ -17,7 +17,7 @@ export const FeaturedGamesSkeleton: React.FC = () => (
       </div>
       <ShimmerBox className="h-3 w-24 rounded" />
     </div>
-    <ShimmerBox className="h-[176px] sm:h-[280px] md:h-[340px] rounded-xl sm:rounded-2xl border border-zinc-800/80" />
+    <ShimmerBox className="h-[200px] sm:h-[312px] md:h-[380px] rounded-xl sm:rounded-2xl border border-zinc-800/80" />
     <div className="flex justify-center gap-1.5 pt-3">
       <span className="w-1.5 h-1.5 rounded-full bg-zinc-700" />
       <span className="w-1.5 h-1.5 rounded-full bg-zinc-800" />
@@ -36,7 +36,7 @@ export const FeaturedMediaSkeleton: React.FC = () => (
       {Array.from({ length: 4 }, (_, index) => (
         <ShimmerBox
           key={index}
-          className="w-[78%] shrink-0 aspect-[9/16] rounded-2xl border border-zinc-800/80 sm:w-[38%] md:w-[34%] lg:w-[28%] xl:w-[22%]"
+          className="w-[44%] shrink-0 aspect-[9/16] rounded-2xl border border-zinc-800/80 sm:w-[38%] md:w-[34%] lg:w-[28%] xl:w-[22%]"
         />
       ))}
     </div>

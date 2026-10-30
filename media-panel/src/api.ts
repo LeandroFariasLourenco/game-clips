@@ -86,6 +86,17 @@ export async function refreshGameMetadata(name: string): Promise<GameMetadataRes
   return response.json();
 }
 
+export async function renameGame(name: string, nextName: string): Promise<GameDetails> {
+  if (isTauri()) return invoke("rename_game", { name, nextName });
+  const response = await fetch(`/api/games/${encodeURIComponent(name)}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name: nextName }),
+  });
+  if (!response.ok) throw new Error(await readError(response));
+  return response.json();
+}
+
 export async function deleteGame(name: string): Promise<void> {
   if (isTauri()) {
     await invoke("delete_game", { name });
@@ -105,6 +116,23 @@ export async function deleteMediaFile(name: string, key: string): Promise<void> 
     { method: "DELETE" },
   );
   if (!response.ok) throw new Error(await readError(response));
+}
+
+export async function updateMediaDate(
+  name: string,
+  key: string,
+  date: string,
+): Promise<{ key: string; url: string; name: string }> {
+  if (isTauri()) {
+    return invoke("update_media_date", { name, key, date });
+  }
+  const response = await fetch(`/api/games/${encodeURIComponent(name)}/file`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ key, date }),
+  });
+  if (!response.ok) throw new Error(await readError(response));
+  return response.json();
 }
 
 export async function searchSteamGridGames(query: string): Promise<SteamGridGameMatch[]> {

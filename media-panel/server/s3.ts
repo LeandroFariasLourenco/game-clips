@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { basename, extname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+  CopyObjectCommand,
   DeleteObjectCommand,
   GetObjectCommand,
   HeadObjectCommand,
@@ -10,6 +11,7 @@ import {
   S3Client,
   type _Object,
 } from "@aws-sdk/client-s3";
+import { datedMediaFileName, mediaStemFromFileName, relabelMediaFileName } from "../src/mediaNames.ts";
 import {
   coverKey,
   forgetAsset,
@@ -124,6 +126,10 @@ function encodePath(segments: string[]): string {
     .filter(Boolean)
     .map((segment) => encodeURIComponent(segment))
     .join("/");
+}
+
+function copySource(bucket: string, key: string): string {
+  return `${bucket}/${encodePath(key.split("/"))}`;
 }
 
 function publicUrl(base: string, segments: string[]): string {
@@ -668,6 +674,225 @@ export async function createGame(name: string): Promise<GameDetails> {
   };
   await writeGameDetails(details);
   return details;
+}
+
+function remappedGameKey(key: string, fromGame: string, toGame: string): string {
+  const prefix = `${fromGame}/`;
+  if (key === fromGame || key === prefix) return `${toGame}/`;
+  if (!key.startsWith(prefix)) return key;
+  const rest = key.slice(prefix.length);
+  const nextRest = rest
+    .split("/")
+    .map((segment) => (segment ? relabelMediaFileName(segment, fromGame, toGame) : segment))
+    .join("/");
+  return `${toGame}/${nextRest}`;
+}
+
+export async function renameGame(name: string, nextName: string): Promise<GameDetails> {
+  const fromGame = sanitizeGameName(name);
+  const toGame = sanitizeGameName(nextName);
+  if (fromGame === toGame) {
+    return getGame(fromGame, { refresh: true });
+  }
+
+  const existing = await listGamesFromS3();
+  if (!existing.some((item) => item.name === fromGame) && !(await prefixExists(`${fromGame}/`))) {
+    throw new HttpError(`Não existe a pasta "${fromGame}" no bucket.`, 404);
+  }
+  const clash = existing.find(
+    (item) =>
+      item.name !== fromGame &&
+      item.name.localeCompare(toGame, "pt", { sensitivity: "accent" }) === 0,
+  );
+  if (clash) {
+    throw new HttpError(
+      clash.name === toGame
+        ? `Já existe um jogo com a pasta "${toGame}".`
+        : `Já existe a pasta "${clash.name}" (o bucket diferencia maiúsculas/minúsculas).`,
+      409,
+    );
+  }
+  if (await prefixExists(`${toGame}/`)) {
+    throw new HttpError(`Já existe conteúdo na pasta "${toGame}/" do bucket.`, 409);
+  }
+
+  const keys = await listAllKeys(`${fromGame}/`);
+  const copies = keys
+    .filter((key) => key !== metadataObjectKey(fromGame))
+    .map((from) => ({ from, to: remappedGameKey(from, fromGame, toGame) }));
+
+  const sourceSet = new Set(keys);
+  for (const item of copies) {
+    if (sourceSet.has(item.to)) continue;
+    if (await objectExists(item.to)) {
+      throw new HttpError(`Já existe o arquivo "${item.to}" no bucket.`, 409);
+    }
+  }
+
+  for (const item of copies) {
+    await copyObjectKeepMetadata(item.from, item.to);
+  }
+
+  const { client, bucket, publicBaseUrl } = getS3();
+  for (const key of keys) {
+    await client.send(new DeleteObjectCommand({ Bucket: bucket, Key: key }));
+    await forgetAsset(key);
+  }
+
+  await refreshGameMetadata(toGame);
+  await removeCatalogGame(fromGame);
+  await removeGameAssets(fromGame);
+  await upsertCatalogGame({
+    name: toGame,
+    coverUrl: publicUrl(publicBaseUrl, [toGame, COVER_FILE]),
+  });
+
+  return getGame(toGame, { refresh: true });
+}
+
+function parseRequestedDate(value: string): Date {
+  const trimmed = value.trim();
+  if (!trimmed) throw new HttpError("Informe a nova data.", 400);
+  const date = new Date(trimmed);
+  if (Number.isNaN(date.getTime())) throw new HttpError("Data inválida.", 400);
+  return date;
+}
+
+function assertSafeMediaKey(key: string): string {
+  const normalized = key.trim().replace(/^\/+/, "");
+  if (!normalized || normalized.includes("..") || normalized.includes("\\") || normalized.includes("\0")) {
+    throw new HttpError("Chave de mídia inválida.", 400);
+  }
+  return normalized;
+}
+
+async function copyObjectKeepMetadata(fromKey: string, toKey: string): Promise<void> {
+  if (fromKey === toKey) return;
+  const { client, bucket } = getS3();
+  await client.send(
+    new CopyObjectCommand({
+      Bucket: bucket,
+      CopySource: copySource(bucket, fromKey),
+      Key: toKey,
+      MetadataDirective: "COPY",
+    }),
+  );
+}
+
+async function listingNames(game: string, kind: "image" | "video"): Promise<string[]> {
+  if (kind === "image") {
+    const objects = await listAll(`${game}/images/`);
+    return objects
+      .map((object) => (object.Key || "").slice(`${game}/images/`.length))
+      .filter((name) => name && !name.includes("/"));
+  }
+  return groupVideos(game, await listAll(`${game}/videos/`)).map((file) => file.name);
+}
+
+function mapVideoDestination(sourceKey: string, game: string, oldFolder: string, nextStem: string): string {
+  const prefix = `${game}/videos/${oldFolder}`;
+  if (sourceKey === prefix || sourceKey === `${prefix}/`) {
+    return `${game}/videos/${nextStem}/`;
+  }
+  const rest = sourceKey.startsWith(`${prefix}/`) ? sourceKey.slice(prefix.length + 1) : "";
+  const oldStem = mediaStemFromFileName(oldFolder);
+  if (mediaStemFromFileName(rest) === oldStem) {
+    const ext = rest.slice(oldStem.length);
+    return `${game}/videos/${nextStem}/${nextStem}${ext}`;
+  }
+  return `${game}/videos/${nextStem}/${rest}`;
+}
+
+export async function updateMediaDate(
+  name: string,
+  key: string,
+  dateValue: string,
+): Promise<{ key: string; url: string; name: string }> {
+  const game = sanitizeGameName(name);
+  const normalized = assertSafeMediaKey(key);
+  const date = parseRequestedDate(dateValue);
+  const imagePrefix = `${game}/images/`;
+  const videoPrefix = `${game}/videos/`;
+  const { publicBaseUrl } = getS3();
+
+  let copies: Array<{ from: string; to: string }> = [];
+  let nextName: string;
+  let nextKey: string;
+
+  if (normalized.startsWith(imagePrefix)) {
+    const currentName = normalized.slice(imagePrefix.length);
+    if (!currentName || currentName.includes("/")) {
+      throw new HttpError("Só é possível alterar a data de screenshots em images/.", 400);
+    }
+    const reserved = (await listingNames(game, "image")).filter((item) => item !== currentName);
+    nextName = datedMediaFileName(currentName, date, game, reserved);
+    nextKey = `${imagePrefix}${nextName}`;
+    copies = [{ from: normalized, to: nextKey }];
+  } else if (normalized.startsWith(videoPrefix)) {
+    const relative = normalized.slice(videoPrefix.length);
+    if (!relative) {
+      throw new HttpError("Só é possível alterar a data de clips em videos/.", 400);
+    }
+    const slash = relative.indexOf("/");
+    const currentName = slash < 0 ? relative : relative.slice(0, slash);
+    const reserved = (await listingNames(game, "video")).filter((item) => item !== currentName);
+    nextName = datedMediaFileName(currentName, date, game, reserved);
+    const nextStem = mediaStemFromFileName(nextName);
+
+    if (slash < 0) {
+      nextKey = `${videoPrefix}${nextName}`;
+      copies = [{ from: normalized, to: nextKey }];
+    } else {
+      const folder = currentName;
+      const rest = relative.slice(slash + 1);
+      if (!folder || !rest || rest.includes("/")) {
+        throw new HttpError("Só é possível alterar a data de clips em videos/.", 400);
+      }
+      const folderKeys = await listAllKeys(`${game}/videos/${folder}/`);
+      const sources = folderKeys.length > 0 ? folderKeys : [normalized];
+      copies = sources.map((from) => ({
+        from,
+        to: mapVideoDestination(from, game, folder, nextStem),
+      }));
+      const mp4 = copies.find((item) => item.to.endsWith(".mp4"));
+      nextKey = mp4?.to ?? `${game}/videos/${nextStem}/${nextStem}.mp4`;
+    }
+  } else {
+    throw new HttpError("Só é possível alterar a data de screenshots em images/ ou clips em videos/.", 400);
+  }
+
+  const sourceSet = new Set(copies.map((item) => item.from));
+  const sourcesExist = await Promise.all(copies.map((item) => objectExists(item.from)));
+  if (sourcesExist.every((exists) => !exists)) {
+    throw new HttpError("Arquivo não encontrado no bucket.", 404);
+  }
+  for (const item of copies) {
+    if (sourceSet.has(item.to)) continue;
+    if (await objectExists(item.to)) {
+      throw new HttpError(`Já existe um arquivo com o nome "${nextName}".`, 409);
+    }
+  }
+
+  const changed = copies.filter((item) => item.from !== item.to);
+  if (changed.length === 0) {
+    return { key: nextKey, url: mediaUrl(publicBaseUrl, nextKey), name: nextName };
+  }
+
+  for (const item of changed) {
+    await copyObjectKeepMetadata(item.from, item.to);
+  }
+  const destSet = new Set(copies.map((item) => item.to));
+  const { client, bucket } = getS3();
+  for (const from of sourceSet) {
+    if (destSet.has(from)) continue;
+    await client.send(new DeleteObjectCommand({ Bucket: bucket, Key: from }));
+    await forgetAsset(from);
+  }
+
+  await refreshGameMetadata(game);
+  await invalidateGame(game);
+
+  return { key: nextKey, url: mediaUrl(publicBaseUrl, nextKey), name: nextName };
 }
 
 export async function deleteMediaFile(name: string, key: string): Promise<{ deleted: string[] }> {

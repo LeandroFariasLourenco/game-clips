@@ -17,12 +17,22 @@ import {
   listGames,
   pickFiles,
   refreshGameMetadata,
+  renameGame,
   sourceLastModified,
+  updateMediaDate,
   uploadMedia,
   withFileMtimes,
   type PickedSource,
 } from "./api";
-import { fileBaseName, mediaDestination, sequentialMediaNames } from "./mediaNames";
+import {
+  datedMediaFileName,
+  dateFromStandardizedName,
+  fileBaseName,
+  mediaDestination,
+  mediaFileLabel,
+  sequentialMediaNames,
+  toDatetimeLocalValue,
+} from "./mediaNames";
 import { CreateGameModal } from "./CreateGameModal";
 import { Icon } from "./icons";
 import { LocalImport } from "./LocalImport";
@@ -37,6 +47,7 @@ type PendingDelete =
   | { type: "file"; kind: DropKind; game: string; name: string; key: string };
 type FileMenu = { x: number; y: number; kind: DropKind; file: MediaFile };
 type GameMenu = { x: number; y: number; name: string };
+type PendingDate = { kind: DropKind; game: string; file: MediaFile };
 type PendingUpload = {
   kind: DropKind;
   skipped: number;
@@ -69,6 +80,10 @@ function App() {
   const [fileMenu, setFileMenu] = useState<FileMenu | null>(null);
   const [gameMenu, setGameMenu] = useState<GameMenu | null>(null);
   const [pendingUpload, setPendingUpload] = useState<PendingUpload | null>(null);
+  const [pendingDate, setPendingDate] = useState<PendingDate | null>(null);
+  const [updatingDate, setUpdatingDate] = useState(false);
+  const [pendingRename, setPendingRename] = useState<string | null>(null);
+  const [renaming, setRenaming] = useState(false);
   const [listPage, setListPage] = useState(0);
   const selectedRef = useRef<string | null>(null);
   const detailsRef = useRef<GameDetails | null>(null);
@@ -354,13 +369,70 @@ function App() {
   }
 
   function requestRemoveGame(name: string) {
-    if (removing || !canRemoveGame(name)) return;
+    if (removing || renaming || !canRemoveGame(name)) return;
     setPendingDelete({ type: "game", name });
+  }
+
+  function requestRenameGame(name: string) {
+    if (removing || renaming || uploading !== null || pendingUpload !== null) return;
+    setPendingRename(name);
+  }
+
+  async function confirmRenameGame(nextName: string) {
+    if (!pendingRename || renaming) return;
+    setRenaming(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const renamed = await renameGame(pendingRename, nextName);
+      setPendingRename(null);
+      setSelectedName(renamed.name);
+      await loadList(false);
+      await loadDetails(renamed.name, true);
+      setNotice(
+        pendingRename === renamed.name
+          ? `O nome "${renamed.name}" já estava em uso.`
+          : `Jogo renomeado de "${pendingRename}" para "${renamed.name}".`,
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setRenaming(false);
+    }
   }
 
   function requestRemoveFile(kind: DropKind, file: { name: string; key: string }) {
     if (!selectedName || removing) return;
     setPendingDelete({ type: "file", kind, game: selectedName, name: file.name, key: file.key });
+  }
+
+  function requestEditDate(kind: DropKind, file: MediaFile) {
+    if (!selectedName || removing || uploading !== null || pendingUpload !== null) return;
+    setPendingDate({ kind, game: selectedName, file });
+  }
+
+  async function confirmPendingDate(nextDate: Date) {
+    if (!pendingDate || updatingDate) return;
+    setUpdatingDate(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const result = await updateMediaDate(
+        pendingDate.game,
+        pendingDate.file.key,
+        nextDate.toISOString(),
+      );
+      await loadDetails(pendingDate.game, true);
+      const label = pendingDate.kind === "image" ? "Screenshot" : "Clip";
+      setNotice(
+        `${label} renomeado para "${result.name ?? pendingDate.file.name}". A data ficou no nome do arquivo.`,
+      );
+      setPendingDate(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setUpdatingDate(false);
+    }
   }
 
   async function confirmPendingDelete() {
@@ -700,9 +772,13 @@ function App() {
         <FileContextMenu
           x={fileMenu.x}
           y={fileMenu.y}
-          disabled={removing || uploading !== null || pendingUpload !== null}
+          disabled={removing || renaming || uploading !== null || pendingUpload !== null || updatingDate}
           label={fileMenu.kind === "image" ? `Remover imagem ${fileMenu.file.name}` : `Remover vídeo ${fileMenu.file.name}`}
           onClose={() => setFileMenu(null)}
+          onEditDate={() => {
+            requestEditDate(fileMenu.kind, fileMenu.file);
+            setFileMenu(null);
+          }}
           onDelete={() => {
             requestRemoveFile(fileMenu.kind, fileMenu.file);
             setFileMenu(null);
@@ -714,13 +790,18 @@ function App() {
         <FileContextMenu
           x={gameMenu.x}
           y={gameMenu.y}
-          disabled={removing || uploading !== null || pendingUpload !== null || !canRemoveGame(gameMenu.name)}
+          disabled={removing || renaming || uploading !== null || pendingUpload !== null}
+          deleteDisabled={!canRemoveGame(gameMenu.name)}
           label={
             canRemoveGame(gameMenu.name)
               ? `Remover jogo ${gameMenu.name}`
               : "Remova screenshots e clips antes de excluir o jogo."
           }
           onClose={() => setGameMenu(null)}
+          onRename={() => {
+            requestRenameGame(gameMenu.name);
+            setGameMenu(null);
+          }}
           onDelete={() => {
             requestRemoveGame(gameMenu.name);
             setGameMenu(null);
@@ -754,6 +835,35 @@ function App() {
               skipped,
             );
           }}
+        />
+      )}
+
+      {pendingRename && (
+        <GameRenameDialog
+          currentName={pendingRename}
+          busy={renaming}
+          onCancel={() => {
+            if (!renaming) setPendingRename(null);
+          }}
+          onConfirm={(nextName) => void confirmRenameGame(nextName)}
+        />
+      )}
+
+      {pendingDate && (
+        <DateEditDialog
+          kind={pendingDate.kind}
+          file={pendingDate.file}
+          gameName={pendingDate.game}
+          reservedNames={
+            pendingDate.kind === "image"
+              ? (details?.images ?? []).map((file) => file.name).filter((name) => name !== pendingDate.file.name)
+              : (details?.videos ?? []).map((file) => file.name).filter((name) => name !== pendingDate.file.name)
+          }
+          busy={updatingDate}
+          onCancel={() => {
+            if (!updatingDate) setPendingDate(null);
+          }}
+          onConfirm={(nextDate) => void confirmPendingDate(nextDate)}
         />
       )}
 
@@ -859,19 +969,26 @@ function FileContextMenu({
   x,
   y,
   disabled,
+  deleteDisabled,
   label,
   onClose,
   onDelete,
+  onEditDate,
+  onRename,
 }: {
   x: number;
   y: number;
   disabled: boolean;
+  deleteDisabled?: boolean;
   label: string;
   onClose: () => void;
   onDelete: () => void;
+  onEditDate?: () => void;
+  onRename?: () => void;
 }) {
+  const itemCount = 1 + (onEditDate ? 1 : 0) + (onRename ? 1 : 0);
   const left = Math.max(8, Math.min(x, 1024 - 176));
-  const top = Math.max(8, Math.min(y, 768 - 52));
+  const top = Math.max(8, Math.min(y, 768 - (12 + itemCount * 40)));
 
   useEffect(() => {
     function onKey(event: KeyboardEvent) {
@@ -897,11 +1014,37 @@ function FileContextMenu({
       style={{ left, top }}
       onMouseDown={(event) => event.stopPropagation()}
     >
+      {onRename ? (
+        <button
+          type="button"
+          role="menuitem"
+          className="file-context-item"
+          disabled={disabled}
+          title="Renomear pasta do jogo"
+          onClick={onRename}
+        >
+          <Icon name="pencil" size={14} />
+          Renomear
+        </button>
+      ) : null}
+      {onEditDate ? (
+        <button
+          type="button"
+          role="menuitem"
+          className="file-context-item"
+          disabled={disabled}
+          title="Alterar a data no nome do arquivo"
+          onClick={onEditDate}
+        >
+          <Icon name="calendar" size={14} />
+          Alterar data
+        </button>
+      ) : null}
       <button
         type="button"
         role="menuitem"
         className="file-context-delete"
-        disabled={disabled}
+        disabled={disabled || deleteDisabled}
         title={label}
         aria-label={label}
         onClick={onDelete}
@@ -1121,6 +1264,199 @@ function UploadConfirmDialog({
           <button type="button" className="primary" onClick={onConfirm}>
             <Icon name="upload" />
             {confirmLabel}
+          </button>
+        </footer>
+      </div>
+    </div>
+  );
+}
+
+function DateEditDialog({
+  kind,
+  file,
+  gameName,
+  reservedNames,
+  busy,
+  onCancel,
+  onConfirm,
+}: {
+  kind: DropKind;
+  file: MediaFile;
+  gameName: string;
+  reservedNames: string[];
+  busy: boolean;
+  onCancel: () => void;
+  onConfirm: (date: Date) => void;
+}) {
+  const initial =
+    dateFromStandardizedName(file.name) ??
+    (file.insertedAt ? new Date(file.insertedAt) : new Date());
+  const fallback = Number.isNaN(initial.getTime()) ? new Date() : initial;
+  const [value, setValue] = useState(toDatetimeLocalValue(fallback));
+  const nextDate = new Date(value);
+  const valid = !Number.isNaN(nextDate.getTime());
+  const nextName = valid ? datedMediaFileName(file.name, nextDate, gameName, reservedNames) : file.name;
+
+  useEffect(() => {
+    function onKey(event: KeyboardEvent) {
+      if (event.key === "Escape" && !busy) onCancel();
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [busy, onCancel]);
+
+  return (
+    <div className="modal-backdrop" role="presentation" onClick={busy ? undefined : onCancel}>
+      <div
+        className="modal confirm-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="date-edit-title"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <header>
+          <div>
+            <p className="eyebrow">Nome do arquivo</p>
+            <h2 id="date-edit-title">{kind === "image" ? "Alterar data da imagem" : "Alterar data do vídeo"}</h2>
+          </div>
+          <button
+            type="button"
+            className="ghost icon-btn"
+            onClick={onCancel}
+            disabled={busy}
+            title="Cancelar"
+            aria-label="Cancelar"
+          >
+            <Icon name="x" />
+          </button>
+        </header>
+        <div className="confirm-body">
+          <p>
+            A data entra no prefixo <code>YYYY-MM-DDTHHmmssZ</code> (UTC). O objeto no bucket é copiado com o
+            novo nome; a metadata do S3 não é reescrita.
+          </p>
+          <label className="field">
+            Nova data
+            <input
+              className="search"
+              type="datetime-local"
+              step="1"
+              value={value}
+              disabled={busy}
+              onChange={(event) => setValue(event.target.value)}
+            />
+          </label>
+          <p className="rename-preview">
+            <span className="muted">Atual:</span> <code>{file.name}</code>
+          </p>
+          <p className="rename-preview">
+            <span className="muted">Novo:</span> <code>{nextName}</code>
+          </p>
+        </div>
+        <footer>
+          <button type="button" className="ghost" disabled={busy} onClick={onCancel}>
+            Cancelar
+          </button>
+          <button
+            type="button"
+            className="primary"
+            disabled={busy || !valid || nextName === file.name}
+            onClick={() => onConfirm(nextDate)}
+          >
+            <Icon name="calendar" className={busy ? "spin" : undefined} />
+            {busy ? "Atualizando…" : "Salvar data"}
+          </button>
+        </footer>
+      </div>
+    </div>
+  );
+}
+
+function GameRenameDialog({
+  currentName,
+  busy,
+  onCancel,
+  onConfirm,
+}: {
+  currentName: string;
+  busy: boolean;
+  onCancel: () => void;
+  onConfirm: (nextName: string) => void;
+}) {
+  const [value, setValue] = useState(currentName);
+  const nextName = value.trim().replace(/\s+/g, " ");
+  const invalidChar = /[\\/:*?"<>|]/.test(nextName);
+  const unchanged = nextName === currentName;
+  const canSave = Boolean(nextName) && !invalidChar && !unchanged && nextName !== "." && nextName !== "..";
+
+  useEffect(() => {
+    function onKey(event: KeyboardEvent) {
+      if (event.key === "Escape" && !busy) onCancel();
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [busy, onCancel]);
+
+  return (
+    <div className="modal-backdrop" role="presentation" onClick={busy ? undefined : onCancel}>
+      <div
+        className="modal confirm-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="game-rename-title"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <header>
+          <div>
+            <p className="eyebrow">Pasta do jogo</p>
+            <h2 id="game-rename-title">Renomear jogo</h2>
+          </div>
+          <button
+            type="button"
+            className="ghost icon-btn"
+            onClick={onCancel}
+            disabled={busy}
+            title="Cancelar"
+            aria-label="Cancelar"
+          >
+            <Icon name="x" />
+          </button>
+        </header>
+        <div className="confirm-body">
+          <p>
+            A pasta <strong>{currentName}</strong> será movida no bucket. Screenshots e clips padronizados
+            passam a usar o rótulo <code>{mediaFileLabel(nextName || currentName)}</code> no nome do arquivo.
+            O metadata.json é gerado de novo com as URLs novas.
+          </p>
+          <label className="field">
+            Novo nome
+            <input
+              className="search"
+              value={value}
+              disabled={busy}
+              autoFocus
+              onChange={(event) => setValue(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && canSave && !busy) onConfirm(nextName);
+              }}
+            />
+          </label>
+          {invalidChar ? (
+            <p className="missing">O nome não pode conter \ / : * ? " &lt; &gt; |</p>
+          ) : null}
+        </div>
+        <footer>
+          <button type="button" className="ghost" disabled={busy} onClick={onCancel}>
+            Cancelar
+          </button>
+          <button
+            type="button"
+            className="primary"
+            disabled={busy || !canSave}
+            onClick={() => onConfirm(nextName)}
+          >
+            <Icon name="pencil" className={busy ? "spin" : undefined} />
+            {busy ? "Renomeando…" : "Salvar nome"}
           </button>
         </footer>
       </div>

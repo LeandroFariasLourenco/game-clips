@@ -7,6 +7,7 @@
     "dev": "vite",
     "dev:window": "tauri dev",
     "build": "tsc && vite build",
+    "build:exe": "tauri build",
     "preview": "vite preview",
     "tauri": "tauri",
     "list:games": "node --experimental-strip-types --no-warnings scripts/list-root-folders.mjs"

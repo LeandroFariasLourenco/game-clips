@@ -3,12 +3,14 @@ import { motion } from 'motion/react';
 import { GameMedia } from '../types/game';
 import { videoUrlBesideThumb } from '../config/mediaConfig';
 import { overlayTransition } from '../motion';
+import { formatMediaCapturedAt } from '../utils/mediaSort';
 import {
   X,
   Download,
   Film,
   Image as ImageIcon,
   Archive,
+  Clock,
   ZoomIn,
   ZoomOut,
   Maximize2,
@@ -151,12 +153,17 @@ export const MediaViewerModal: React.FC<MediaViewerModalProps> = ({ media, onClo
       </div>
 
       {media.type === 'screenshot' || media.type === 'artwork' ? (
-        <ImageZoomViewer key={media.url} src={media.url} />
+        <ImageZoomViewer
+          key={media.url}
+          src={media.url}
+          capturedAt={formatMediaCapturedAt(media.name, media.createdTime)}
+        />
       ) : media.type === 'video' ? (
         <VideoPlayback
           key={media.url}
           src={videoUrlBesideThumb(media.url, media.thumbnailUrl, media.name)}
           poster={media.thumbnailUrl}
+          capturedAt={formatMediaCapturedAt(media.name, media.createdTime)}
         />
       ) : (
         <div className="absolute inset-0 flex items-center justify-center p-4">
@@ -182,51 +189,64 @@ export const MediaViewerModal: React.FC<MediaViewerModalProps> = ({ media, onClo
   );
 };
 
-function VideoPlayback({ src, poster }: { src: string; poster?: string }) {
+function isAbortError(error: unknown) {
+  return error instanceof DOMException && error.name === 'AbortError';
+}
+
+function MediaCapturedAtLabel({ capturedAt }: { capturedAt?: string | null }) {
+  if (!capturedAt) return null;
+  return (
+    <p className="inline-flex items-center gap-1.5 text-xs text-zinc-300">
+      <Clock className="h-3.5 w-3.5 text-zinc-500 shrink-0" aria-hidden="true" />
+      <time>{capturedAt}</time>
+    </p>
+  );
+}
+
+function VideoPlayback({
+  src,
+  poster,
+  capturedAt,
+}: {
+  src: string;
+  poster?: string;
+  capturedAt?: string | null;
+}) {
   const videoRef = useRef<HTMLVideoElement>(null);
-  const startedRef = useRef(false);
+  const playGenRef = useRef(0);
   const [loading, setLoading] = useState(true);
   const [failed, setFailed] = useState(false);
 
   const tryPlay = useCallback(async (video: HTMLVideoElement) => {
-    if (startedRef.current && !video.paused) return;
-
-    const attempt = async (muted: boolean) => {
+    const generation = playGenRef.current;
+    const play = async (muted: boolean) => {
       video.muted = muted;
       await video.play();
     };
 
     try {
-      await attempt(false);
-      startedRef.current = true;
-    } catch {
+      await play(false);
+    } catch (error) {
+      if (isAbortError(error) || generation !== playGenRef.current) return;
       try {
-        await attempt(true);
-        video.muted = false;
-        startedRef.current = true;
-      } catch {
-        try {
-          await attempt(true);
-          startedRef.current = true;
-        } catch {
-          setFailed(true);
-          setLoading(false);
-        }
+        await play(true);
+      } catch (mutedError) {
+        if (isAbortError(mutedError) || generation !== playGenRef.current) return;
+        setLoading(false);
       }
     }
   }, []);
 
   useEffect(() => {
-    const video = videoRef.current;
-    if (!video) return;
-    startedRef.current = false;
+    playGenRef.current += 1;
     setLoading(true);
     setFailed(false);
-    void tryPlay(video);
+    const video = videoRef.current;
+    if (video) void tryPlay(video);
   }, [src, tryPlay]);
 
   return (
-    <div className="absolute inset-0 flex items-center justify-center p-4 sm:p-10">
+    <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 p-4 sm:p-10">
       <div
         className="relative w-full max-w-5xl aspect-video rounded-xl overflow-hidden bg-black shadow-2xl"
         aria-busy={loading}
@@ -244,7 +264,7 @@ function VideoPlayback({ src, poster }: { src: string; poster?: string }) {
           </div>
         )}
         {failed && (
-          <p className="absolute inset-0 z-10 grid place-items-center px-6 text-center text-xs text-zinc-400">
+          <p className="pointer-events-none absolute inset-0 z-10 grid place-items-center px-6 text-center text-xs text-zinc-400">
             Não foi possível reproduzir o vídeo.
           </p>
         )}
@@ -266,10 +286,14 @@ function VideoPlayback({ src, poster }: { src: string; poster?: string }) {
             setFailed(false);
           }}
           onCanPlay={(event) => {
+            setLoading(false);
             void tryPlay(event.currentTarget);
           }}
           onError={() => {
-            setFailed(true);
+            const mediaError = videoRef.current?.error;
+            if (mediaError && mediaError.code !== mediaError.MEDIA_ERR_ABORTED) {
+              setFailed(true);
+            }
             setLoading(false);
           }}
           className="w-full h-full object-contain bg-black"
@@ -277,11 +301,12 @@ function VideoPlayback({ src, poster }: { src: string; poster?: string }) {
           Seu navegador não suporta reprodução deste vídeo.
         </video>
       </div>
+      <MediaCapturedAtLabel capturedAt={capturedAt} />
     </div>
   );
 }
 
-function ImageZoomViewer({ src }: { src: string }) {
+function ImageZoomViewer({ src, capturedAt }: { src: string; capturedAt?: string | null }) {
   const viewportRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<{
     pointerId: number;
@@ -553,7 +578,8 @@ function ImageZoomViewer({ src }: { src: string }) {
         />
       </div>
 
-      <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 flex flex-wrap items-center justify-center gap-2 bg-gradient-to-t from-black/70 to-transparent px-4 py-3">
+      <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 flex flex-col items-center justify-center gap-2 bg-gradient-to-t from-black/70 to-transparent px-4 py-3">
+        <MediaCapturedAtLabel capturedAt={capturedAt} />
         <div className="pointer-events-auto flex flex-wrap items-center justify-center gap-2">
         <div className="flex items-center gap-1 rounded-full border border-zinc-800 bg-zinc-900/80 p-1 backdrop-blur-md">
           <button

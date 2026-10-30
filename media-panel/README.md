@@ -19,6 +19,15 @@ npm run tauri dev
 
 Na raiz do repositório: `npm run panel:dev`.
 
+## Executável
+
+```bash
+cd media-panel
+npm run build:exe
+```
+
+Na raiz: `npm run panel:build`. O Tauri gera o `.exe` em `src-tauri/target/release/` e os instaladores em `src-tauri/target/release/bundle/` (NSIS/MSI no Windows). Exige Rust (`rustup`) e as ferramentas de build da plataforma.
+
 O frontend também pode ser aberto com `npm run dev` (http://localhost:1420). Nesse modo o Vite usa `@aws-sdk/client-s3` para listar e enviar arquivos. O binário Tauri usa o mesmo bucket no backend Rust.
 
 Para só conferir as pastas da raiz:

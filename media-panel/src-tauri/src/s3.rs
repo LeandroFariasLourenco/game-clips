@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 
 use aws_sdk_s3::config::{BehaviorVersion, Credentials, Region};
 use aws_sdk_s3::primitives::ByteStream;
+use aws_sdk_s3::types::MetadataDirective;
 use aws_sdk_s3::Client;
 use serde::{Deserialize, Serialize};
 
@@ -90,6 +91,8 @@ pub struct GamesCatalog {
 pub struct UploadResult {
     pub key: String,
     pub url: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -139,6 +142,216 @@ fn encode_path(segments: &[&str]) -> String {
         .map(|segment| urlencoding::encode(segment).into_owned())
         .collect::<Vec<_>>()
         .join("/")
+}
+
+fn copy_source(bucket: &str, key: &str) -> String {
+    format!("{bucket}/{}", encode_path(&[key]))
+}
+
+fn split_file_name(name: &str) -> (String, String) {
+    let base = name.rsplit(['/', '\\']).next().unwrap_or(name);
+    match base.rfind('.') {
+        Some(index) if index > 0 => (base[..index].to_string(), base[index + 1..].to_string()),
+        _ => (base.to_string(), String::new()),
+    }
+}
+
+fn media_file_label(game: &str) -> String {
+    let label = game.replace('_', " ");
+    let trimmed = label.trim();
+    if trimmed.is_empty() {
+        "game".into()
+    } else {
+        trimmed.to_string()
+    }
+}
+
+fn is_utc_stamp(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    bytes.len() == 18
+        && bytes[4] == b'-'
+        && bytes[7] == b'-'
+        && bytes[10] == b'T'
+        && bytes[17] == b'Z'
+        && bytes.iter().enumerate().all(|(index, byte)| match index {
+            4 | 7 | 10 | 17 => true,
+            _ => byte.is_ascii_digit(),
+        })
+}
+
+fn parse_standardized_stem(stem: &str) -> Option<(String, u32)> {
+    let hash = stem.rfind('#')?;
+    let sequence = stem[hash + 1..].parse().ok()?;
+    let rest = &stem[..hash];
+    let z = rest.find("Z_")?;
+    let stamp = &rest[..=z];
+    let game = rest.get(z + 2..)?.to_string();
+    if !is_utc_stamp(stamp) || game.is_empty() {
+        return None;
+    }
+    Some((game, sequence))
+}
+
+fn used_sequences(names: impl IntoIterator<Item = impl AsRef<str>>, game: &str) -> HashSet<u32> {
+    let label = media_file_label(game);
+    let mut used = HashSet::new();
+    for name in names {
+        let (stem, _) = split_file_name(name.as_ref());
+        if let Some((parsed_game, sequence)) = parse_standardized_stem(&stem) {
+            if parsed_game == label {
+                used.insert(sequence);
+            }
+        }
+    }
+    used
+}
+
+fn next_sequence(used: &HashSet<u32>) -> u32 {
+    let mut sequence = 1;
+    while used.contains(&sequence) {
+        sequence += 1;
+    }
+    sequence
+}
+
+fn format_utc_stamp(year: i32, month: u8, day: u8, hour: u8, minute: u8, second: u8) -> String {
+    format!("{year:04}-{month:02}-{day:02}T{hour:02}{minute:02}{second:02}Z")
+}
+
+fn parse_iso_utc(value: &str) -> Result<(i32, u8, u8, u8, u8, u8), Error> {
+    let raw = value.trim();
+    if raw.is_empty() {
+        return Err(Error::Message("Informe a nova data.".into()));
+    }
+    let without_z = raw.strip_suffix('Z').unwrap_or(raw);
+    let without_offset = without_z
+        .split_once('+')
+        .map(|(left, _)| left)
+        .unwrap_or(without_z);
+    let core = without_offset.split('.').next().unwrap_or(without_offset);
+    let (date, time) = core
+        .split_once('T')
+        .ok_or_else(|| Error::Message("Data inválida.".into()))?;
+    let date_parts: Vec<_> = date.split('-').collect();
+    let time_parts: Vec<_> = time.split(':').collect();
+    if date_parts.len() != 3 || time_parts.len() < 2 {
+        return Err(Error::Message("Data inválida.".into()));
+    }
+    let parse_part = |part: &str| {
+        part.parse::<u32>()
+            .map_err(|_| Error::Message("Data inválida.".into()))
+    };
+    let year = date_parts[0]
+        .parse::<i32>()
+        .map_err(|_| Error::Message("Data inválida.".into()))?;
+    let month = parse_part(date_parts[1])? as u8;
+    let day = parse_part(date_parts[2])? as u8;
+    let hour = parse_part(time_parts[0])? as u8;
+    let minute = parse_part(time_parts[1])? as u8;
+    let second = if time_parts.len() > 2 {
+        parse_part(time_parts[2])? as u8
+    } else {
+        0
+    };
+    if !(1..=12).contains(&month)
+        || !(1..=31).contains(&day)
+        || hour > 23
+        || minute > 59
+        || second > 59
+    {
+        return Err(Error::Message("Data inválida.".into()));
+    }
+    Ok((year, month, day, hour, minute, second))
+}
+
+fn dated_media_file_name(
+    current_name: &str,
+    stamp: &str,
+    game: &str,
+    reserved: &[String],
+) -> String {
+    let (stem, ext) = split_file_name(current_name);
+    let (label, sequence) = match parse_standardized_stem(&stem) {
+        Some((label, sequence)) => (label, sequence),
+        None => (
+            media_file_label(game),
+            next_sequence(&used_sequences(reserved, game)),
+        ),
+    };
+    let suffix = if ext.is_empty() {
+        String::new()
+    } else {
+        format!(".{ext}")
+    };
+    format!("{stamp}_{label}#{sequence}{suffix}")
+}
+
+fn relabel_media_file_name(current: &str, from_game: &str, to_game: &str) -> String {
+    let (stem, ext) = split_file_name(current);
+    let Some((label, sequence)) = parse_standardized_stem(&stem) else {
+        return current.to_string();
+    };
+    if label != media_file_label(from_game) {
+        return current.to_string();
+    }
+    let Some(stamp) = stem.get(..18) else {
+        return current.to_string();
+    };
+    if !is_utc_stamp(stamp) {
+        return current.to_string();
+    }
+    let suffix = if ext.is_empty() {
+        String::new()
+    } else {
+        format!(".{ext}")
+    };
+    format!(
+        "{stamp}_{}#{sequence}{suffix}",
+        media_file_label(to_game)
+    )
+}
+
+fn remapped_game_key(key: &str, from_game: &str, to_game: &str) -> String {
+    let prefix = format!("{from_game}/");
+    if key == from_game || key == prefix {
+        return format!("{to_game}/");
+    }
+    let Some(rest) = key.strip_prefix(&prefix) else {
+        return key.to_string();
+    };
+    let next_rest = rest
+        .split('/')
+        .map(|segment| {
+            if segment.is_empty() {
+                segment.to_string()
+            } else {
+                relabel_media_file_name(segment, from_game, to_game)
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("/");
+    format!("{to_game}/{next_rest}")
+}
+
+fn map_video_destination(source_key: &str, game: &str, old_folder: &str, next_stem: &str) -> String {
+    let prefix = format!("{game}/videos/{old_folder}");
+    if source_key == prefix || source_key == format!("{prefix}/") {
+        return format!("{game}/videos/{next_stem}/");
+    }
+    let rest = source_key
+        .strip_prefix(&format!("{prefix}/"))
+        .unwrap_or("");
+    let (old_stem, _) = split_file_name(old_folder);
+    let (rest_stem, rest_ext) = split_file_name(rest);
+    if rest_stem == old_stem {
+        let suffix = if rest_ext.is_empty() {
+            String::new()
+        } else {
+            format!(".{rest_ext}")
+        };
+        return format!("{game}/videos/{next_stem}/{next_stem}{suffix}");
+    }
+    format!("{game}/videos/{next_stem}/{rest}")
 }
 
 fn public_url(base: &str, segments: &[&str]) -> String {
@@ -870,6 +1083,7 @@ pub async fn upload_media(
     Ok(UploadResult {
         url: media_url(&settings, &key),
         key,
+        name: None,
     })
 }
 
@@ -991,6 +1205,266 @@ pub async fn create_game(name: String) -> Result<GameDetails, Error> {
     };
     let _ = cache::write_game(&details);
     Ok(details)
+}
+
+pub async fn rename_game(name: String, next_name: String) -> Result<GameDetails, Error> {
+    let from_game = sanitize_game_name(&name)?;
+    let to_game = sanitize_game_name(&next_name)?;
+    if from_game == to_game {
+        return get_game(from_game, true).await;
+    }
+
+    let catalog = list_games(true).await?;
+    let exists = catalog.games.iter().any(|item| item.name == from_game);
+    let settings = build_client()?;
+    if !exists && !prefix_exists(&settings, &format!("{from_game}/")).await? {
+        return Err(Error::Message(format!(
+            "Não existe a pasta \"{from_game}\" no bucket."
+        )));
+    }
+    if let Some(clash) = catalog.games.iter().find(|item| {
+        item.name != from_game && item.name.eq_ignore_ascii_case(&to_game)
+    }) {
+        return Err(Error::Message(if clash.name == to_game {
+            format!("Já existe um jogo com a pasta \"{to_game}\".")
+        } else {
+            format!(
+                "Já existe a pasta \"{}\" (o bucket diferencia maiúsculas/minúsculas).",
+                clash.name
+            )
+        }));
+    }
+    if prefix_exists(&settings, &format!("{to_game}/")).await? {
+        return Err(Error::Message(format!(
+            "Já existe conteúdo na pasta \"{to_game}/\" do bucket."
+        )));
+    }
+
+    let keys = list_all_keys(&settings, &format!("{from_game}/")).await?;
+    let metadata_key = format!("{from_game}/{METADATA_FILE}");
+    let copies: Vec<(String, String)> = keys
+        .iter()
+        .filter(|key| *key != &metadata_key)
+        .map(|from| (from.clone(), remapped_game_key(from, &from_game, &to_game)))
+        .collect();
+
+    let source_set: HashSet<String> = keys.iter().cloned().collect();
+    for (_, to) in &copies {
+        if source_set.contains(to) {
+            continue;
+        }
+        if object_exists(&settings, to).await? {
+            return Err(Error::Message(format!(
+                "Já existe o arquivo \"{to}\" no bucket."
+            )));
+        }
+    }
+
+    for (from, to) in &copies {
+        copy_object_keep_metadata(&settings, from, to).await?;
+    }
+    for key in &keys {
+        settings
+            .client
+            .delete_object()
+            .bucket(&settings.bucket)
+            .key(key)
+            .send()
+            .await
+            .map_err(|error| Error::S3(error.to_string()))?;
+        cache::forget_asset(key);
+    }
+
+    refresh_game_metadata(to_game.clone()).await?;
+    cache::remove_catalog_game(&from_game);
+    cache::remove_game_assets(&from_game);
+    let mut games = cache::read_catalog()
+        .map(|catalog| catalog.games)
+        .unwrap_or_else(|| catalog.games);
+    games.retain(|item| item.name != from_game && item.name != to_game);
+    games.push(GameSummary {
+        name: to_game.clone(),
+        cover_url: public_url(&settings.public_base_url, &[&to_game, COVER_FILE]),
+    });
+    games.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    cache::write_catalog(&games).map_err(Error::Message)?;
+
+    get_game(to_game, true).await
+}
+
+async fn copy_object_keep_metadata(
+    settings: &Settings,
+    from_key: &str,
+    to_key: &str,
+) -> Result<(), Error> {
+    if from_key == to_key {
+        return Ok(());
+    }
+    settings
+        .client
+        .copy_object()
+        .bucket(&settings.bucket)
+        .copy_source(copy_source(&settings.bucket, from_key))
+        .key(to_key)
+        .metadata_directive(MetadataDirective::Copy)
+        .send()
+        .await
+        .map_err(|error| Error::S3(error.to_string()))?;
+    Ok(())
+}
+
+pub async fn update_media_date(
+    name: String,
+    key: String,
+    date: String,
+) -> Result<UploadResult, Error> {
+    let game = sanitize_game_name(&name)?;
+    let normalized = key.trim().trim_start_matches('/').to_string();
+    if normalized.is_empty()
+        || normalized.contains("..")
+        || normalized.contains('\\')
+        || normalized.contains('\0')
+    {
+        return Err(Error::Message("Chave de mídia inválida.".into()));
+    }
+
+    let (year, month, day, hour, minute, second) = parse_iso_utc(&date)?;
+    let stamp = format_utc_stamp(year, month, day, hour, minute, second);
+    let settings = build_client()?;
+    let image_prefix = format!("{game}/images/");
+    let video_prefix = format!("{game}/videos/");
+
+    let mut copies: Vec<(String, String)> = Vec::new();
+    let next_name: String;
+    let next_key: String;
+
+    if let Some(current_name) = normalized.strip_prefix(&image_prefix) {
+        if current_name.is_empty() || current_name.contains('/') {
+            return Err(Error::Message(
+                "Só é possível alterar a data de screenshots em images/.".into(),
+            ));
+        }
+        let objects = list_keys(&settings, &image_prefix).await?;
+        let reserved: Vec<String> = objects
+            .iter()
+            .filter_map(|(object_key, _, _)| {
+                let name = object_key.strip_prefix(&image_prefix)?;
+                if name.is_empty() || name.contains('/') || name == current_name {
+                    None
+                } else {
+                    Some(name.to_string())
+                }
+            })
+            .collect();
+        next_name = dated_media_file_name(current_name, &stamp, &game, &reserved);
+        next_key = format!("{image_prefix}{next_name}");
+        copies.push((normalized.clone(), next_key.clone()));
+    } else if let Some(relative) = normalized.strip_prefix(&video_prefix) {
+        if relative.is_empty() {
+            return Err(Error::Message(
+                "Só é possível alterar a data de clips em videos/.".into(),
+            ));
+        }
+        let current_name = relative.split_once('/').map(|(folder, _)| folder).unwrap_or(relative);
+        let objects = list_keys(&settings, &video_prefix).await?;
+        let reserved: Vec<String> = group_videos(&settings, &game, &objects)
+            .into_iter()
+            .filter(|file| file.name != current_name)
+            .map(|file| file.name)
+            .collect();
+        next_name = dated_media_file_name(current_name, &stamp, &game, &reserved);
+        let (next_stem, _) = split_file_name(&next_name);
+
+        match relative.split_once('/') {
+            None => {
+                next_key = format!("{video_prefix}{next_name}");
+                copies.push((normalized.clone(), next_key.clone()));
+            }
+            Some((folder, rest)) => {
+                if folder.is_empty() || rest.is_empty() || rest.contains('/') {
+                    return Err(Error::Message(
+                        "Só é possível alterar a data de clips em videos/.".into(),
+                    ));
+                }
+                let folder_keys =
+                    list_all_keys(&settings, &format!("{game}/videos/{folder}/")).await?;
+                let sources = if folder_keys.is_empty() {
+                    vec![normalized.clone()]
+                } else {
+                    folder_keys
+                };
+                copies = sources
+                    .into_iter()
+                    .map(|from| {
+                        let to = map_video_destination(&from, &game, folder, &next_stem);
+                        (from, to)
+                    })
+                    .collect();
+                next_key = copies
+                    .iter()
+                    .find(|(_, to)| to.ends_with(".mp4"))
+                    .map(|(_, to)| to.clone())
+                    .unwrap_or_else(|| {
+                        format!("{game}/videos/{next_stem}/{next_stem}.mp4")
+                    });
+            }
+        }
+    } else {
+        return Err(Error::Message(
+            "Só é possível alterar a data de screenshots em images/ ou clips em videos/.".into(),
+        ));
+    }
+
+    let source_set: HashSet<String> = copies.iter().map(|(from, _)| from.clone()).collect();
+    for (_, to) in &copies {
+        if source_set.contains(to) {
+            continue;
+        }
+        if object_exists(&settings, to).await? {
+            return Err(Error::Message(format!(
+                "Já existe um arquivo com o nome \"{next_name}\"."
+            )));
+        }
+    }
+
+    let changed: Vec<&(String, String)> = copies
+        .iter()
+        .filter(|(from, to)| from != to)
+        .collect();
+    if changed.is_empty() {
+        return Ok(UploadResult {
+            key: next_key,
+            url: media_url(&settings, &next_key),
+            name: Some(next_name),
+        });
+    }
+
+    for (from, to) in changed {
+        copy_object_keep_metadata(&settings, from, to).await?;
+    }
+    let dest_set: HashSet<String> = copies.iter().map(|(_, to)| to.clone()).collect();
+    for from in &source_set {
+        if dest_set.contains(from) {
+            continue;
+        }
+        settings
+            .client
+            .delete_object()
+            .bucket(&settings.bucket)
+            .key(from)
+            .send()
+            .await
+            .map_err(|error| Error::S3(error.to_string()))?;
+        cache::forget_asset(from);
+    }
+
+    refresh_game_metadata(game).await?;
+
+    Ok(UploadResult {
+        key: next_key,
+        url: media_url(&settings, &next_key),
+        name: Some(next_name),
+    })
 }
 
 pub async fn delete_media(name: String, key: String) -> Result<(), Error> {

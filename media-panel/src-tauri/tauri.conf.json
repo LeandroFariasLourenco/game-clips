@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Painel de Mídias",
+  "productName": "Game clips admin panel",
   "version": "0.1.0",
   "identifier": "com.gamevault.mediapanel",
   "build": {
@@ -13,7 +13,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "Painel de Mídias",
+        "title": "Game clips admin panel",
         "width": 1024,
         "height": 768,
         "minWidth": 1024,

@@ -4,21 +4,25 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   buildStandardizedMediaName,
+  datedMediaFileName,
   dateFromStandardizedName,
   formatFileDateStamp,
   formatUtcStamp,
   isStandardizedMediaName,
   mediaFileLabel,
+  mediaStemFromFileName,
   parseStandardizedMediaName,
 } from "../src/mediaNames.ts";
 
 export {
   buildStandardizedMediaName,
+  datedMediaFileName,
   dateFromStandardizedName,
   formatFileDateStamp,
   formatUtcStamp,
   isStandardizedMediaName,
   mediaFileLabel,
+  mediaStemFromFileName,
   parseStandardizedMediaName,
 };
 

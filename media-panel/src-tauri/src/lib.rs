@@ -149,8 +149,26 @@ async fn delete_game(name: String) -> Result<(), String> {
 }
 
 #[tauri::command]
+async fn rename_game(name: String, next_name: String) -> Result<s3::GameDetails, String> {
+    s3::rename_game(name, next_name)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 async fn delete_media(name: String, key: String) -> Result<(), String> {
     s3::delete_media(name, key)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn update_media_date(
+    name: String,
+    key: String,
+    date: String,
+) -> Result<s3::UploadResult, String> {
+    s3::update_media_date(name, key, date)
         .await
         .map_err(|error| error.to_string())
 }
@@ -187,7 +205,9 @@ pub fn run() {
             file_mtimes,
             create_game,
             delete_game,
+            rename_game,
             delete_media,
+            update_media_date,
             get_game_metadata,
             refresh_game_metadata
         ])

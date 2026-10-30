@@ -76,7 +76,7 @@ export const FeaturedGamesCarousel: React.FC<FeaturedGamesCarouselProps> = ({
           <SwiperSlide key={game.id}>
             <Link
               to={gameDetailsPath(game.name)}
-              className="relative block h-[176px] sm:h-[280px] md:h-[340px] rounded-xl sm:rounded-2xl overflow-hidden border border-zinc-800/80 bg-zinc-950 group"
+              className="relative block h-[200px] sm:h-[312px] md:h-[380px] rounded-xl sm:rounded-2xl overflow-hidden border border-zinc-800/80 bg-zinc-950 group"
               aria-label={`Ver mídias de ${game.name}`}
               title={game.name}
             >

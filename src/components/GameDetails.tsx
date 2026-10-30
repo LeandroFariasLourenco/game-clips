@@ -169,12 +169,13 @@ export const GameDetails: React.FC<GameDetailsProps> = ({ game }) => {
   return (
     <div className="relative pb-12">
       {/* Background banner from the media bucket */}
-      <div className="relative w-full h-[280px] sm:h-[380px] lg:h-[420px] overflow-hidden -mx-4 sm:-mx-6 lg:-mx-8 bg-zinc-950">
+      <div className="relative left-1/2 w-screen max-w-[100vw] -translate-x-1/2 h-[280px] sm:h-[380px] lg:h-[420px] overflow-hidden bg-zinc-950">
         {bannerUrl ? (
           <ShimmerImage
             src={bannerUrl}
             alt=""
-            className="w-full h-full object-cover brightness-[0.7] contrast-105 scale-100"
+            wrapperClassName="absolute inset-0"
+            className="absolute inset-0 h-full w-full object-cover object-[center_20%] brightness-[0.7] contrast-105"
             loading="eager"
             decoding="async"
             onError={() => {
@@ -192,7 +193,8 @@ export const GameDetails: React.FC<GameDetailsProps> = ({ game }) => {
         <div className="absolute inset-0 bg-gradient-to-t from-[#121212] via-[#121212]/80 to-transparent" />
         <div className="absolute inset-0 bg-gradient-to-r from-[#121212]/80 via-[#121212]/30 to-transparent" />
 
-        <div className="absolute inset-x-0 bottom-0 z-10 px-4 sm:px-8 pb-4 sm:pb-6">
+        <div className="absolute inset-x-0 bottom-0 z-10">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-4 sm:pb-6">
           <div className="flex items-end justify-between gap-3 sm:gap-6">
             <div className="flex items-center gap-2.5 sm:gap-4 min-w-0">
               <div className="w-10 h-10 sm:w-14 sm:h-14 lg:w-16 lg:h-16 rounded-lg sm:rounded-xl bg-zinc-900/80 border border-zinc-700/60 p-1 shadow-lg shrink-0 overflow-hidden">
@@ -247,6 +249,7 @@ export const GameDetails: React.FC<GameDetailsProps> = ({ game }) => {
                 />
               </div>
             )}
+          </div>
           </div>
         </div>
       </div>

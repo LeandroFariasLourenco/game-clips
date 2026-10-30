@@ -1,3 +1,4 @@
+import { sanitizeVideoSrc } from '../config/mediaConfig';
 import { Game, GameMedia } from '../types/game';
 import { fileNameFromUrl, shuffleInPlace } from './featuredRotation';
 
@@ -16,6 +17,7 @@ export interface GameMetadata {
 export interface FeaturedHighlight {
   gameId: string;
   gameName: string;
+  gameIcon?: string;
   media: GameMedia;
 }
 
@@ -87,7 +89,8 @@ function imageMedia(game: Game, url: string): GameMedia {
 }
 
 function videoMedia(game: Game, clip: GameMetadataVideo): GameMedia {
-  const name = fileNameFromUrl(clip.url);
+  const url = sanitizeVideoSrc(clip.url);
+  const name = fileNameFromUrl(url);
   return {
     id: `highlight-${game.id}-video-${name}`,
     gameId: game.id,
@@ -95,8 +98,8 @@ function videoMedia(game: Game, clip: GameMetadataVideo): GameMedia {
     type: 'video',
     mimeType: mimeFromName(name, 'video'),
     size: 0,
-    url: clip.url,
-    thumbnailUrl: clip.thumb || undefined,
+    url,
+    thumbnailUrl: clip.thumb ? sanitizeVideoSrc(clip.thumb) : undefined,
   };
 }
 
