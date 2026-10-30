@@ -15,8 +15,10 @@ import {
   REEL_SWIPE_PX,
   REEL_TAP_PX,
   reelFetchPriorityForAttach,
+  reelHoldKind,
   reelPreloadForAttach,
   type ReelAttachMode,
+  type ReelHoldKind,
 } from '../utils/reelFeed';
 
 interface ReelPlayerProps {
@@ -36,6 +38,21 @@ interface ReelPlayerProps {
 }
 
 type SnapDirection = 'next' | 'prev' | null;
+
+const REEL_BLUR_BACKDROP_CLASS =
+  'pointer-events-none absolute inset-0 h-full w-full scale-125 object-cover opacity-70 blur-2xl';
+
+function formatReelDuration(seconds: number): string {
+  if (!Number.isFinite(seconds) || seconds < 0) return '';
+  const total = Math.max(0, Math.round(seconds));
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  const rest = total % 60;
+  if (hours > 0) {
+    return `${hours}:${minutes.toString().padStart(2, '0')}:${rest.toString().padStart(2, '0')}`;
+  }
+  return `${minutes}:${rest.toString().padStart(2, '0')}`;
+}
 
 export const ReelPlayer: React.FC<ReelPlayerProps> = ({
   stack,
@@ -63,7 +80,14 @@ export const ReelPlayer: React.FC<ReelPlayerProps> = ({
   const offsetRef = useRef(0);
   const heightRef = useRef(0);
   const skipTransitionRef = useRef(false);
-  const pointerRef = useRef<{ id: number; x: number; y: number; holding: boolean; dragging: boolean } | null>(null);
+  const pointerRef = useRef<{
+    id: number;
+    x: number;
+    y: number;
+    holding: boolean;
+    holdKind: ReelHoldKind | null;
+    dragging: boolean;
+  } | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const loadedIdsRef = useRef(new Set<string>());
 
@@ -71,16 +95,23 @@ export const ReelPlayer: React.FC<ReelPlayerProps> = ({
   const [offset, setOffset] = useState(0);
   const [snapping, setSnapping] = useState(false);
   const [paused, setPaused] = useState(false);
-  const [holding, setHolding] = useState(false);
+  const [holdMode, setHoldMode] = useState<ReelHoldKind | null>(null);
   const [soundOn, setSoundOn] = useState(false);
   const [progress, setProgress] = useState(0);
   const [ready, setReady] = useState(false);
   const [canWarmNext, setCanWarmNext] = useState(false);
+  const [scrubbing, setScrubbing] = useState(false);
   const soundOnRef = useRef(false);
+  const scrubbingRef = useRef(false);
+  const wantPausedRef = useRef(false);
+  const progressTrackRef = useRef<HTMLDivElement | null>(null);
 
   offsetRef.current = offset;
   heightRef.current = height;
   const isVideo = current?.media.type === 'video';
+  const speedHold = holdMode === 'speed';
+  const pressPaused = holdMode === 'pause';
+  wantPausedRef.current = pressPaused || (paused && !speedHold) || scrubbing;
 
   const applyOffset = (value: number, withTransition: boolean) => {
     skipTransitionRef.current = !withTransition;
@@ -96,7 +127,12 @@ export const ReelPlayer: React.FC<ReelPlayerProps> = ({
     update();
     const observer = new ResizeObserver(update);
     observer.observe(node);
-    return () => observer.disconnect();
+    const blockMenu = (event: Event) => event.preventDefault();
+    node.addEventListener('contextmenu', blockMenu, { capture: true });
+    return () => {
+      observer.disconnect();
+      node.removeEventListener('contextmenu', blockMenu, { capture: true });
+    };
   }, []);
 
   useEffect(() => {
@@ -118,15 +154,68 @@ export const ReelPlayer: React.FC<ReelPlayerProps> = ({
     lastTickRef.current = 0;
     rateRef.current = 1;
     setPaused(false);
-    setHolding(false);
+    setHoldMode(null);
     setProgress(0);
+    setScrubbing(false);
+    scrubbingRef.current = false;
     setReady(current ? loadedIdsRef.current.has(current.media.id) : false);
     setCanWarmNext(false);
     onRestartWatch();
   }, [current?.media.id, onRestartWatch]);
 
+  const seekToRatio = useCallback((ratio: number) => {
+    const next = Math.min(1, Math.max(0, ratio));
+    setProgress(next);
+    const video = videoRef.current;
+    const duration = video?.duration;
+    if (!video || !duration || !Number.isFinite(duration) || duration <= 0) return;
+    video.currentTime = next >= 0.999 ? Math.max(0, duration - 0.05) : next * duration;
+  }, []);
+
+  const ratioFromClientX = (clientX: number) => {
+    const track = progressTrackRef.current;
+    if (!track) return 0;
+    const rect = track.getBoundingClientRect();
+    if (rect.width <= 0) return 0;
+    return Math.min(1, Math.max(0, (clientX - rect.left) / rect.width));
+  };
+
+  const onProgressPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (!isVideo || event.button !== 0 || snappingRef.current) return;
+    event.stopPropagation();
+    event.preventDefault();
+    window.clearTimeout(holdTimerRef.current);
+    pointerRef.current = null;
+    scrubbingRef.current = true;
+    setScrubbing(true);
+    if (holdMode) {
+      setHoldMode(null);
+      setRate(1);
+    }
+    try {
+      event.currentTarget.setPointerCapture(event.pointerId);
+    } catch {
+      /* synthetic or already-released pointers */
+    }
+    seekToRatio(ratioFromClientX(event.clientX));
+  };
+
+  const onProgressPointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (!scrubbingRef.current) return;
+    event.stopPropagation();
+    seekToRatio(ratioFromClientX(event.clientX));
+  };
+
+  const onProgressPointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (!scrubbingRef.current) return;
+    event.stopPropagation();
+    seekToRatio(ratioFromClientX(event.clientX));
+    scrubbingRef.current = false;
+    setScrubbing(false);
+  };
+
   const finish = useCallback(() => {
-    if (completedRef.current || snappingRef.current) return;
+    if (completedRef.current || snappingRef.current || scrubbingRef.current) return;
     completedRef.current = true;
     setProgress(1);
     onCompleted();
@@ -136,7 +225,7 @@ export const ReelPlayer: React.FC<ReelPlayerProps> = ({
   }, [onCompleted, onPrefetchNext]);
 
   useEffect(() => {
-    if (!active || !current || paused && !holding || snappingRef.current) return;
+    if (!active || !current || pressPaused || (paused && !speedHold) || snappingRef.current || scrubbing) return;
 
     let frame = 0;
     const tick = (now: number) => {
@@ -165,25 +254,29 @@ export const ReelPlayer: React.FC<ReelPlayerProps> = ({
     lastTickRef.current = 0;
     frame = window.requestAnimationFrame(tick);
     return () => window.cancelAnimationFrame(frame);
-  }, [active, current, paused, holding, isVideo, finish]);
+  }, [active, current, paused, pressPaused, speedHold, isVideo, finish, scrubbing]);
 
   useEffect(() => {
     const video = videoRef.current;
     if (!video || !current || !isVideo || !active || snappingRef.current) return;
-    video.playbackRate = holding ? 2 : paused ? 0 : rateRef.current;
-    if (paused && !holding) {
+    video.playbackRate = speedHold ? 2 : wantPausedRef.current ? 0 : rateRef.current;
+    if (wantPausedRef.current) {
       video.pause();
       return;
     }
     video.muted = !soundOnRef.current;
     video.defaultMuted = !soundOnRef.current;
     video.volume = soundOnRef.current ? 1 : 0;
-    void video.play().catch(() => {
-      if (soundOnRef.current) return;
+    void video.play().then(() => {
+      if (wantPausedRef.current) video.pause();
+    }).catch(() => {
+      if (soundOnRef.current || wantPausedRef.current) return;
       video.muted = true;
-      void video.play().catch(() => {});
+      void video.play().then(() => {
+        if (wantPausedRef.current) video.pause();
+      }).catch(() => {});
     });
-  }, [active, current, isVideo, paused, holding]);
+  }, [active, current, isVideo, paused, pressPaused, speedHold, scrubbing]);
 
   const setRate = (rate: number) => {
     rateRef.current = rate;
@@ -246,21 +339,31 @@ export const ReelPlayer: React.FC<ReelPlayerProps> = ({
 
   const onPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
     if (event.button !== 0 || snappingRef.current) return;
+    if (event.target instanceof Element && event.target.closest('[data-reel-game-link]')) return;
+    if (event.cancelable) event.preventDefault();
     pointerRef.current = {
       id: event.pointerId,
       x: event.clientX,
       y: event.clientY,
       holding: false,
+      holdKind: null,
       dragging: false,
     };
-    event.currentTarget.setPointerCapture(event.pointerId);
+    try {
+      event.currentTarget.setPointerCapture(event.pointerId);
+    } catch {
+      /* synthetic or already-released pointers */
+    }
     window.clearTimeout(holdTimerRef.current);
     holdTimerRef.current = window.setTimeout(() => {
       const pointer = pointerRef.current;
       if (!pointer || pointer.dragging) return;
+      const bounds = viewportRef.current?.getBoundingClientRect();
+      const kind = reelHoldKind(pointer.x - (bounds?.left ?? 0), bounds?.width ?? window.innerWidth);
       pointer.holding = true;
-      setHolding(true);
-      setRate(2);
+      pointer.holdKind = kind;
+      setHoldMode(kind);
+      if (kind === 'speed') setRate(2);
     }, REEL_HOLD_MS);
   };
 
@@ -274,7 +377,8 @@ export const ReelPlayer: React.FC<ReelPlayerProps> = ({
     window.clearTimeout(holdTimerRef.current);
     if (pointer.holding) {
       pointer.holding = false;
-      setHolding(false);
+      pointer.holdKind = null;
+      setHoldMode(null);
       setRate(1);
     }
     pointer.dragging = true;
@@ -293,7 +397,7 @@ export const ReelPlayer: React.FC<ReelPlayerProps> = ({
     pointerRef.current = null;
 
     if (pointer.holding) {
-      setHolding(false);
+      setHoldMode(null);
       setRate(1);
       return;
     }
@@ -370,7 +474,8 @@ export const ReelPlayer: React.FC<ReelPlayerProps> = ({
   return (
     <div
       ref={viewportRef}
-      className="relative h-full w-full touch-none overflow-hidden bg-black select-none"
+      className="reel-player relative h-full w-full touch-none overflow-hidden bg-black select-none"
+      onContextMenu={(event) => event.preventDefault()}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
@@ -425,10 +530,18 @@ export const ReelPlayer: React.FC<ReelPlayerProps> = ({
             >
               <ReelSlide
                 entry={entry}
-                playing={isCurrent && active && !paused}
-                holding={isCurrent && holding}
+                playing={isCurrent && active && !pressPaused && (!paused || speedHold)}
+                holding={isCurrent && speedHold}
                 paused={isCurrent && paused}
+                pressPaused={isCurrent && pressPaused}
+                speedHold={isCurrent && speedHold}
+                scrubbing={isCurrent && scrubbing}
+                gameLink={isCurrent}
                 progress={isCurrent ? progress : 0}
+                progressTrackRef={isCurrent ? progressTrackRef : undefined}
+                onProgressPointerDown={isCurrent ? onProgressPointerDown : undefined}
+                onProgressPointerMove={isCurrent ? onProgressPointerMove : undefined}
+                onProgressPointerUp={isCurrent ? onProgressPointerUp : undefined}
                 ready={!isCurrent || ready}
                 loading={isCurrent ? !entry && loading : pendingNext}
                 attach={isCurrent ? 'play' : role === 'next' ? (canWarmNext ? 'warm' : 'metadata') : 'keep'}
@@ -445,9 +558,9 @@ export const ReelPlayer: React.FC<ReelPlayerProps> = ({
                       ? () => loadedIdsRef.current.add(entry.media.id)
                       : undefined
                 }
-                onEnded={isCurrent ? finish : undefined}
+                onEnded={isCurrent && !scrubbing ? finish : undefined}
               />
-              {isCurrent && paused && !holding && current ? (
+              {isCurrent && paused && !holdMode && current ? (
                 <div className="pointer-events-none absolute inset-0 z-30 flex flex-col items-center justify-center gap-5">
                   {isVideo ? (
                     <button
@@ -511,7 +624,15 @@ function ReelSlide({
   playing = false,
   holding = false,
   paused = false,
+  pressPaused = false,
+  speedHold = false,
+  scrubbing = false,
+  gameLink = false,
   progress = 0,
+  progressTrackRef,
+  onProgressPointerDown,
+  onProgressPointerMove,
+  onProgressPointerUp,
   ready = true,
   loading = false,
   attach = 'play',
@@ -525,7 +646,15 @@ function ReelSlide({
   playing?: boolean;
   holding?: boolean;
   paused?: boolean;
+  pressPaused?: boolean;
+  speedHold?: boolean;
+  scrubbing?: boolean;
+  gameLink?: boolean;
   progress?: number;
+  progressTrackRef?: React.RefObject<HTMLDivElement | null>;
+  onProgressPointerDown?: (event: React.PointerEvent<HTMLDivElement>) => void;
+  onProgressPointerMove?: (event: React.PointerEvent<HTMLDivElement>) => void;
+  onProgressPointerUp?: (event: React.PointerEvent<HTMLDivElement>) => void;
   ready?: boolean;
   loading?: boolean;
   attach?: ReelAttachMode;
@@ -536,15 +665,38 @@ function ReelSlide({
   onEnded?: () => void;
 }) {
   const localVideoRef = useRef<HTMLVideoElement | null>(null);
+  const blurCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const wasPlayingRef = useRef(false);
   const onReadyRef = useRef(onReady);
   onReadyRef.current = onReady;
   const isVideo = entry?.media.type === 'video';
   const videoSrc = isVideo ? entry?.src ?? '' : '';
   const { initial, buffering, markFrame, markWaiting } = useVideoLoadAppearance(videoSrc);
+  const [videoDuration, setVideoDuration] = useState(0);
   const capturedAt = entry
     ? formatMediaCapturedAt(entry.media.name, entry.media.createdTime)
     : null;
+
+  useEffect(() => {
+    const video = localVideoRef.current;
+    if (!video || !isVideo) {
+      setVideoDuration(0);
+      return;
+    }
+    const applyDuration = () => {
+      const duration = video.duration;
+      if (duration && Number.isFinite(duration) && duration > 0) {
+        setVideoDuration(duration);
+      }
+    };
+    applyDuration();
+    video.addEventListener('loadedmetadata', applyDuration);
+    video.addEventListener('durationchange', applyDuration);
+    return () => {
+      video.removeEventListener('loadedmetadata', applyDuration);
+      video.removeEventListener('durationchange', applyDuration);
+    };
+  }, [isVideo, videoSrc]);
 
   useEffect(() => {
     if (!videoRef) return;
@@ -572,7 +724,6 @@ function ReelSlide({
     wasPlayingRef.current = playing;
     if (becamePlaying) {
       if (video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
-        video.currentTime = 0;
         markFrame();
         onReadyRef.current?.();
       }
@@ -584,20 +735,76 @@ function ReelSlide({
   }, [playing, holding, isVideo, markFrame, muted, videoSrc]);
 
   useEffect(() => {
+    if (attach !== 'play' || !isVideo) return;
+    const video = localVideoRef.current;
+    if (!video) return;
+    video.currentTime = 0;
+  }, [attach, isVideo, videoSrc]);
+
+  useEffect(() => {
     const video = localVideoRef.current;
     if (!video || !isVideo) return;
     const preload = reelPreloadForAttach(attach);
     if (video.preload !== preload) video.preload = preload;
   }, [attach, isVideo]);
 
+  useEffect(() => {
+    if (!isVideo) return;
+    const video = localVideoRef.current;
+    const canvas = blurCanvasRef.current;
+    if (!video || !canvas) return;
+    const context = canvas.getContext('2d');
+    if (!context) return;
+
+    const paint = () => {
+      if (video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA || !video.videoWidth) return;
+      const width = 64;
+      const height = Math.max(1, Math.round((video.videoHeight / video.videoWidth) * width));
+      if (canvas.width !== width || canvas.height !== height) {
+        canvas.width = width;
+        canvas.height = height;
+      }
+      context.drawImage(video, 0, 0, width, height);
+    };
+
+    let frame = 0;
+    const live = playing || holding || scrubbing;
+    const tick = () => {
+      paint();
+      if (live) frame = window.requestAnimationFrame(tick);
+    };
+    paint();
+    if (live) frame = window.requestAnimationFrame(tick);
+    video.addEventListener('loadeddata', paint);
+    video.addEventListener('seeked', paint);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      video.removeEventListener('loadeddata', paint);
+      video.removeEventListener('seeked', paint);
+    };
+  }, [holding, isVideo, playing, scrubbing, videoSrc]);
+
   return (
     <div className="relative h-full w-full overflow-hidden bg-black">
-      {entry && !isVideo ? (
+      {entry && isVideo ? (
+        <>
+          {entry.media.thumbnailUrl ? (
+            <img
+              src={entry.media.thumbnailUrl}
+              alt=""
+              aria-hidden
+              className={REEL_BLUR_BACKDROP_CLASS}
+              draggable={false}
+            />
+          ) : null}
+          <canvas ref={blurCanvasRef} aria-hidden className={REEL_BLUR_BACKDROP_CLASS} />
+        </>
+      ) : entry ? (
         <img
           src={entry.src}
           alt=""
           aria-hidden
-          className="pointer-events-none absolute inset-0 h-full w-full scale-125 object-cover opacity-70 blur-2xl"
+          className={REEL_BLUR_BACKDROP_CLASS}
           draggable={false}
         />
       ) : null}
@@ -611,12 +818,15 @@ function ReelSlide({
             muted={muted}
             defaultMuted={muted}
             playsInline
+            disablePictureInPicture
+            controlsList="nodownload nofullscreen noremoteplayback"
             preload={reelPreloadForAttach(attach)}
             fetchPriority={reelFetchPriorityForAttach(attach)}
             className="max-h-full max-w-full object-contain"
+            onContextMenu={(event) => event.preventDefault()}
             onWaiting={markWaiting}
             onStalled={markWaiting}
-            onSeeking={markWaiting}
+            onSeeking={scrubbing ? undefined : markWaiting}
             onProgress={(event) => {
               if (event.currentTarget.readyState >= HTMLMediaElement.HAVE_FUTURE_DATA) {
                 onBuffered?.();
@@ -648,6 +858,7 @@ function ReelSlide({
             alt={entry.game.name}
             className="max-h-full max-w-full object-contain"
             draggable={false}
+            onContextMenu={(event) => event.preventDefault()}
             fetchPriority={reelFetchPriorityForAttach(attach)}
             decoding={attach === 'play' ? 'sync' : 'async'}
             onLoad={() => {
@@ -675,13 +886,22 @@ function ReelSlide({
       {entry ? (
         <Link
           to={gameDetailsPath(entry.game.name)}
-          className="absolute bottom-7 left-3 z-40 flex max-w-[80%] items-center gap-2.5"
+          data-reel-game-link=""
+          aria-label={`Ver detalhes de ${entry.game.name}`}
+          tabIndex={gameLink ? undefined : -1}
+          aria-hidden={!gameLink}
+          className={`absolute bottom-14 left-3 z-50 flex max-w-[80%] items-center gap-2.5 ${
+            gameLink ? 'cursor-pointer' : 'pointer-events-none'
+          }`}
           onPointerDown={(event) => event.stopPropagation()}
+          onPointerUp={(event) => event.stopPropagation()}
+          onPointerCancel={(event) => event.stopPropagation()}
+          onClick={(event) => event.stopPropagation()}
         >
           <img
-            src={driveAssetService.getGameIcon(entry.game)}
+            src={driveAssetService.getGameCover(entry.game)}
             alt=""
-            className="h-8 w-8 shrink-0 rounded-full object-cover ring-1 ring-white/30"
+            className="h-9 aspect-[5/7] shrink-0 rounded-md object-cover ring-1 ring-white/30"
             draggable={false}
           />
           <span className="min-w-0">
@@ -697,9 +917,38 @@ function ReelSlide({
         </Link>
       ) : null}
 
-      {playing || paused || holding ? (
-        <div className="absolute inset-x-3 bottom-2 z-40 h-[2px] overflow-hidden rounded-full bg-white/25">
-          <div className="h-full bg-white" style={{ width: `${progress * 100}%` }} />
+      {playing || paused || holding || pressPaused || scrubbing ? (
+        <div
+          className={`absolute inset-x-0 bottom-0 z-40 flex items-end px-3 ${
+            isVideo ? 'h-12 cursor-pointer touch-none pb-1.5' : 'pointer-events-none h-12 pb-1.5'
+          }`}
+          role={isVideo ? 'slider' : undefined}
+          aria-label={isVideo ? 'Progresso do vídeo' : undefined}
+          aria-valuemin={isVideo ? 0 : undefined}
+          aria-valuemax={isVideo ? 100 : undefined}
+          aria-valuenow={isVideo ? Math.round(progress * 100) : undefined}
+          onPointerDown={isVideo ? onProgressPointerDown : undefined}
+          onPointerMove={isVideo ? onProgressPointerMove : undefined}
+          onPointerUp={isVideo ? onProgressPointerUp : undefined}
+          onPointerCancel={isVideo ? onProgressPointerUp : undefined}
+        >
+          {speedHold ? (
+            <span className="pointer-events-none absolute inset-x-3 bottom-5 text-center text-[11px] font-semibold tracking-wide text-white drop-shadow">
+              reproduzindo em 2x
+            </span>
+          ) : isVideo && videoDuration > 0 ? (
+            <span className="pointer-events-none absolute right-3 bottom-5 text-[11px] font-medium tabular-nums text-white/90 drop-shadow">
+              {formatReelDuration(videoDuration)}
+            </span>
+          ) : null}
+          <div
+            ref={isVideo ? progressTrackRef : undefined}
+            className={`w-full overflow-hidden rounded-full bg-white/25 transition-[height] duration-150 ${
+              scrubbing ? 'h-1.5' : 'h-[2px]'
+            }`}
+          >
+            <div className="h-full bg-white" style={{ width: `${progress * 100}%` }} />
+          </div>
         </div>
       ) : null}
     </div>

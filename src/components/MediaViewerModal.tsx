@@ -31,6 +31,9 @@ interface MediaViewerModalProps {
 const MIN_ZOOM = 0.1;
 const MAX_ZOOM = 8;
 const FIT_SNAP_RATIO = 1.04;
+const DOUBLE_TAP_MS = 350;
+const DOUBLE_TAP_PX = 28;
+const DOUBLE_TAP_ZOOM = 2.5;
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
@@ -467,7 +470,7 @@ function VideoPlayback({
 
   return (
     <div
-      className="absolute inset-0 flex flex-col items-center justify-center gap-3 p-4 sm:p-10"
+      className="absolute inset-0 bg-black"
       onPointerDown={(event) => {
         if (!canSwipe || event.button !== 0 || isVideoControlHit(event)) return;
         swipeRef.current = { pointerId: event.pointerId, x: event.clientX, y: event.clientY };
@@ -487,10 +490,7 @@ function VideoPlayback({
         swipeRef.current = null;
       }}
     >
-      <div
-        className="relative w-full max-w-5xl aspect-video rounded-xl overflow-hidden bg-black shadow-2xl"
-        aria-busy={initial || buffering}
-      >
+      <div className="absolute inset-0 overflow-hidden bg-black" aria-busy={initial || buffering}>
         {initial && !failed ? <VideoSkeletonOverlay poster={poster} /> : null}
         {buffering && !failed && !initial ? <VideoBufferOverlay /> : null}
         {failed && (
@@ -536,12 +536,16 @@ function VideoPlayback({
             }
             markFrame();
           }}
-          className="w-full h-full object-contain bg-black"
+          className="h-full w-full object-contain bg-black"
         >
           Seu navegador não suporta reprodução deste vídeo.
         </video>
       </div>
-      <MediaCapturedAtLabel capturedAt={capturedAt} />
+      {capturedAt ? (
+        <div className="pointer-events-none absolute inset-x-0 bottom-16 z-20 flex justify-center px-4">
+          <MediaCapturedAtLabel capturedAt={capturedAt} />
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -584,6 +588,9 @@ function ImageZoomViewer({
   const scaleRef = useRef(scale);
   const offsetRef = useRef(offset);
   const lastTapRef = useRef<{ t: number; x: number; y: number } | null>(null);
+  const skipDblClickRef = useRef(false);
+  const [animatingZoom, setAnimatingZoom] = useState(false);
+  const zoomAnimTimerRef = useRef(0);
   scaleRef.current = scale;
   offsetRef.current = offset;
 
@@ -718,6 +725,30 @@ function ImageZoomViewer({
     return () => observer.disconnect();
   }, [natural.h, natural.w]);
 
+  const animateZoomChange = useCallback(() => {
+    window.clearTimeout(zoomAnimTimerRef.current);
+    setAnimatingZoom(true);
+    zoomAnimTimerRef.current = window.setTimeout(() => setAnimatingZoom(false), 220);
+  }, []);
+
+  useEffect(() => () => window.clearTimeout(zoomAnimTimerRef.current), []);
+
+  const toggleDoubleTapZoom = useCallback(
+    (clientX: number, clientY: number) => {
+      const viewport = viewportRef.current;
+      if (!viewport || natural.w <= 0) return;
+      const rect = viewport.getBoundingClientRect();
+      const fit = fitScale(rect.width, rect.height, natural.w, natural.h);
+      animateZoomChange();
+      if (scaleRef.current > fit * FIT_SNAP_RATIO) {
+        setFit();
+        return;
+      }
+      applyZoom(clamp(fit * DOUBLE_TAP_ZOOM, MIN_ZOOM, MAX_ZOOM), clientX, clientY);
+    },
+    [animateZoomChange, applyZoom, natural.h, natural.w, setFit],
+  );
+
   const settleTransform = useCallback(() => {
     const viewport = viewportRef.current;
     if (!viewport || natural.w <= 0) return;
@@ -823,6 +854,8 @@ function ImageZoomViewer({
 
   function onPointerDown(event: React.PointerEvent<HTMLDivElement>) {
     if (event.button !== 0) return;
+    window.clearTimeout(zoomAnimTimerRef.current);
+    setAnimatingZoom(false);
     event.currentTarget.setPointerCapture(event.pointerId);
     pointersRef.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
     if (pointersRef.current.size >= 2) {
@@ -907,9 +940,14 @@ function ImageZoomViewer({
     if (moved < 12) {
       const now = performance.now();
       const last = lastTapRef.current;
-      if (last && now - last.t < 350 && Math.hypot(event.clientX - last.x, event.clientY - last.y) < 28) {
+      if (
+        last &&
+        now - last.t < DOUBLE_TAP_MS &&
+        Math.hypot(event.clientX - last.x, event.clientY - last.y) < DOUBLE_TAP_PX
+      ) {
         lastTapRef.current = null;
-        setFit();
+        skipDblClickRef.current = true;
+        toggleDoubleTapZoom(event.clientX, event.clientY);
         return;
       }
       lastTapRef.current = { t: now, x: event.clientX, y: event.clientY };
@@ -924,7 +962,11 @@ function ImageZoomViewer({
   function onDoubleClick(event: React.MouseEvent<HTMLDivElement>) {
     event.preventDefault();
     lastTapRef.current = null;
-    setFit();
+    if (skipDblClickRef.current) {
+      skipDblClickRef.current = false;
+      return;
+    }
+    toggleDoubleTapZoom(event.clientX, event.clientY);
   }
 
   const percent = Math.round(scale * 100);
@@ -970,6 +1012,9 @@ function ImageZoomViewer({
             maxHeight: 'none',
             transform: `translate3d(${offset.x}px, ${offset.y}px, 0) scale(${scale})`,
             transformOrigin: '0 0',
+            transition: animatingZoom
+              ? 'transform 0.22s cubic-bezier(0.22, 1, 0.36, 1)'
+              : 'none',
             willChange: 'transform',
             visibility: loaded ? 'visible' : 'hidden',
             userSelect: 'none',

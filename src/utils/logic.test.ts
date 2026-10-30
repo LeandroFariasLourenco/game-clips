@@ -35,6 +35,7 @@ import {
   orderedGamesForReel,
   pickReelMedia,
   reelFetchPriorityForAttach,
+  reelHoldKind,
   reelPreloadForAttach,
 } from './reelFeed';
 import { localAssetService } from '../services/driveAssetService';
@@ -540,6 +541,9 @@ test('reel recommendations keep the same game after a complete watch and switch 
   assert.equal(reelPreloadForAttach('keep'), 'none');
   assert.equal(reelFetchPriorityForAttach('play'), 'high');
   assert.equal(reelFetchPriorityForAttach('warm'), 'low');
+  assert.equal(reelHoldKind(20, 390), 'speed');
+  assert.equal(reelHoldKind(370, 390), 'speed');
+  assert.equal(reelHoldKind(195, 390), 'pause');
   assert.equal(pickReelMedia([media[0]], [media[0].id], () => 0), null);
 
   const dated = allMediaFromMetadata(games[0], {

@@ -287,3 +287,16 @@
   font-size: 0.7rem;
   font-weight: 700;
 }
+
+.reel-player,
+.reel-player video,
+.reel-player img,
+.reel-player canvas {
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.reel-player video::-webkit-media-controls {
+  display: none !important;
+}

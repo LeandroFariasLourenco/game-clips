@@ -2,9 +2,19 @@ import { Game, GameMedia } from '../types/game';
 
 export const REEL_IMAGE_DURATION_MS = 10_000;
 export const REEL_HOLD_MS = 180;
+export const REEL_HOLD_EDGE_RATIO = 0.22;
 export const REEL_SWIPE_PX = 72;
 export const REEL_TAP_PX = 12;
 export const REEL_SNAP_MS = 380;
+
+export type ReelHoldKind = 'speed' | 'pause';
+
+export function reelHoldKind(x: number, width: number): ReelHoldKind {
+  if (!(width > 0) || !Number.isFinite(x)) return 'pause';
+  const edge = Math.min(width * 0.33, Math.max(72, width * REEL_HOLD_EDGE_RATIO));
+  if (x <= edge || x >= width - edge) return 'speed';
+  return 'pause';
+}
 
 export type ReelAttachMode = 'play' | 'warm' | 'metadata' | 'keep';
 
