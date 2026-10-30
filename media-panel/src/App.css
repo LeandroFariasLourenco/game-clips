@@ -72,10 +72,77 @@ html,
 body,
 #root {
   margin: 0;
-  width: 1024px;
-  height: 768px;
+  width: 100%;
+  height: 100%;
   overflow: hidden;
   background: var(--color-bg);
+}
+
+.app-frame {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--color-bg);
+  box-shadow: inset 0 0 0 1px var(--color-border);
+}
+
+.titlebar {
+  display: flex;
+  flex: 0 0 40px;
+  align-items: stretch;
+  height: 40px;
+  background: var(--color-bg-elevated);
+  border-bottom: 1px solid var(--color-border);
+  user-select: none;
+}
+
+.titlebar-drag {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  min-width: 0;
+  padding-left: 14px;
+}
+
+.titlebar-title {
+  overflow: hidden;
+  color: var(--color-text-muted);
+  font-size: 12px;
+  font-weight: 650;
+  letter-spacing: 0.01em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.titlebar-controls {
+  display: flex;
+  flex-shrink: 0;
+}
+
+.titlebar-btn {
+  display: grid;
+  width: 46px;
+  place-items: center;
+  padding: 0;
+  color: var(--color-text-muted);
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  cursor: pointer;
+}
+
+.titlebar-btn:hover {
+  color: var(--color-text);
+  background: var(--color-surface-hover);
+}
+
+.titlebar-btn.close:hover {
+  color: #fff;
+  background: var(--color-danger);
 }
 
 button,
@@ -86,8 +153,10 @@ input {
 .shell {
   display: grid;
   grid-template-columns: 280px minmax(0, 1fr);
-  width: 1024px;
-  height: 768px;
+  flex: 1;
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
   overflow: hidden;
 }
 
@@ -283,7 +352,6 @@ h2 {
   gap: 16px;
   min-width: 0;
   min-height: 0;
-  height: 768px;
   padding: 16px 12px 16px 20px;
   overflow: auto;
 }

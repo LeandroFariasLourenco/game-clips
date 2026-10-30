@@ -66,11 +66,11 @@ export function gamesCatalogUrl(workerUrl?: string | null): string {
 }
 
 function readRuntimeBucketUrl(): string {
-  return resolveMediaBaseUrl(import.meta.env.VITE_MEDIA_BUCKET_URL as string | undefined);
+  return resolveMediaBaseUrl(import.meta.env?.VITE_MEDIA_BUCKET_URL as string | undefined);
 }
 
 function readRuntimeWorkerUrl(): string {
-  return resolveMediaWorkerUrl(import.meta.env.VITE_MEDIA_WORKER_URL as string | undefined);
+  return resolveMediaWorkerUrl(import.meta.env?.VITE_MEDIA_WORKER_URL as string | undefined);
 }
 
 export function getMediaBaseUrl(): string {
@@ -120,20 +120,35 @@ export function sanitizeVideoSrc(raw: string): string {
   }
 }
 
+/**
+ * Large clips must not stream through the Worker (it 500s). Play them from the public bucket.
+ */
+export function toPublicAssetUrl(raw: string): string {
+  const href = sanitizeVideoSrc(raw);
+  try {
+    const url = new URL(href);
+    const workerHost = new URL(readRuntimeWorkerUrl()).host;
+    if (url.host !== workerHost) return href;
+    return `${getMediaBaseUrl()}${url.pathname}${url.search}`;
+  } catch {
+    return href;
+  }
+}
+
 /** Clip mp4 lives beside thumb.jpg: videos/<clip>/<clip>.mp4 */
 export function videoUrlBesideThumb(
   videoUrl: string,
   thumbnailUrl?: string,
   fileName?: string,
 ): string {
-  if (!thumbnailUrl) return sanitizeVideoSrc(videoUrl);
+  if (!thumbnailUrl) return toPublicAssetUrl(videoUrl);
 
   try {
     const thumb = new URL(thumbnailUrl);
     const segments = thumb.pathname.split('/').filter(Boolean);
     const thumbName = decodeURIComponent(segments[segments.length - 1] || '');
     if (thumbName.toLowerCase() !== VIDEO_THUMB_FILE || segments.length < 2) {
-      return sanitizeVideoSrc(videoUrl);
+      return toPublicAssetUrl(videoUrl);
     }
 
     const folder = decodeURIComponent(segments[segments.length - 2] || '');
@@ -141,13 +156,13 @@ export function videoUrlBesideThumb(
     const fromVideo = videoFileNameFromUrl(videoUrl);
     const playbackName =
       listed || (VIDEO_FILE_RE.test(fromVideo) ? fromVideo : '') || (folder ? `${folder}.mp4` : '');
-    if (!playbackName) return sanitizeVideoSrc(videoUrl);
+    if (!playbackName) return toPublicAssetUrl(videoUrl);
 
     segments[segments.length - 1] = encodeURIComponent(playbackName);
     thumb.pathname = `/${segments.join('/')}`;
-    return sanitizeVideoSrc(thumb.toString());
+    return toPublicAssetUrl(thumb.toString());
   } catch {
-    return sanitizeVideoSrc(videoUrl);
+    return toPublicAssetUrl(videoUrl);
   }
 }
 

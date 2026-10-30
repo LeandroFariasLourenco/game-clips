@@ -4,6 +4,7 @@ import { GameMedia } from '../types/game';
 import { videoUrlBesideThumb } from '../config/mediaConfig';
 import { overlayTransition } from '../motion';
 import { formatMediaCapturedAt } from '../utils/mediaSort';
+import { releaseMediaElement } from '../utils/releaseMediaElement';
 import {
   X,
   Download,
@@ -14,10 +15,14 @@ import {
   ZoomIn,
   ZoomOut,
   Maximize2,
+  ChevronLeft,
+  ChevronRight,
 } from 'lucide-react';
 
 interface MediaViewerModalProps {
   media: GameMedia;
+  items?: GameMedia[];
+  onSelect?: (media: GameMedia) => void;
   onClose: () => void;
 }
 
@@ -54,11 +59,22 @@ function clampOffset(
   naturalW: number,
   naturalH: number,
   scale: number,
+  mode: 'center' | 'pan' = 'pan',
 ) {
   const width = naturalW * scale;
   const height = naturalH * scale;
-  const nextX = width <= viewW ? (viewW - width) / 2 : clamp(x, viewW - width, 0);
-  const nextY = height <= viewH ? (viewH - height) / 2 : clamp(y, viewH - height, 0);
+  const nextX =
+    width <= viewW
+      ? mode === 'center'
+        ? (viewW - width) / 2
+        : clamp(x, 0, viewW - width)
+      : clamp(x, viewW - width, 0);
+  const nextY =
+    height <= viewH
+      ? mode === 'center'
+        ? (viewH - height) / 2
+        : clamp(y, 0, viewH - height)
+      : clamp(y, viewH - height, 0);
   return { x: nextX, y: nextY };
 }
 
@@ -95,12 +111,50 @@ function unlockBodyScroll() {
   lockedBodyStyles = null;
 }
 
-export const MediaViewerModal: React.FC<MediaViewerModalProps> = ({ media, onClose }) => {
+const SWIPE_MIN_DISTANCE = 64;
+const SWIPE_DOMINANCE = 1.35;
+
+export const MediaViewerModal: React.FC<MediaViewerModalProps> = ({
+  media,
+  items = [],
+  onSelect,
+  onClose,
+}) => {
+  const index = items.findIndex((item) => item.id === media.id);
+  const total = items.length;
+  const hasPlaylist = Boolean(onSelect && total > 1 && index >= 0);
+  const hasPrev = hasPlaylist && index > 0;
+  const hasNext = hasPlaylist && index < total - 1;
+
+  const goBy = useCallback(
+    (delta: number) => {
+      if (!onSelect || !hasPlaylist) return;
+      const next = items[index + delta];
+      if (next) onSelect(next);
+    },
+    [hasPlaylist, index, items, onSelect],
+  );
+
+  const goPrev = useCallback(() => goBy(-1), [goBy]);
+  const goNext = useCallback(() => goBy(1), [goBy]);
+
   useEffect(() => {
     lockBodyScroll();
 
     function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === 'Escape') onClose();
+      if (event.key === 'Escape') {
+        onClose();
+        return;
+      }
+      if (event.key === 'ArrowLeft') {
+        event.preventDefault();
+        goPrev();
+        return;
+      }
+      if (event.key === 'ArrowRight') {
+        event.preventDefault();
+        goNext();
+      }
     }
 
     window.addEventListener('keydown', handleKeyDown);
@@ -108,7 +162,7 @@ export const MediaViewerModal: React.FC<MediaViewerModalProps> = ({ media, onClo
       unlockBodyScroll();
       window.removeEventListener('keydown', handleKeyDown);
     };
-  }, [onClose]);
+  }, [goNext, goPrev, onClose]);
 
   return (
     <motion.div
@@ -127,6 +181,11 @@ export const MediaViewerModal: React.FC<MediaViewerModalProps> = ({ media, onClo
           ) : (
             <Archive className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
           )}
+          {hasPlaylist ? (
+            <span className="text-[11px] font-mono text-zinc-300">
+              {index + 1}/{total}
+            </span>
+          ) : null}
         </div>
 
         <div className="flex items-center gap-2 pointer-events-auto">
@@ -152,11 +211,36 @@ export const MediaViewerModal: React.FC<MediaViewerModalProps> = ({ media, onClo
         </div>
       </div>
 
+      {hasPrev ? (
+        <button
+          type="button"
+          className="hidden md:flex absolute left-3 top-1/2 z-30 h-12 w-12 -translate-y-1/2 items-center justify-center rounded-full border border-zinc-800 bg-zinc-900/80 text-zinc-200 backdrop-blur-md transition hover:bg-zinc-800 hover:text-white pointer-events-auto cursor-pointer"
+          aria-label="Mídia anterior"
+          title="Anterior"
+          onClick={goPrev}
+        >
+          <ChevronLeft className="h-6 w-6" />
+        </button>
+      ) : null}
+      {hasNext ? (
+        <button
+          type="button"
+          className="hidden md:flex absolute right-3 top-1/2 z-30 h-12 w-12 -translate-y-1/2 items-center justify-center rounded-full border border-zinc-800 bg-zinc-900/80 text-zinc-200 backdrop-blur-md transition hover:bg-zinc-800 hover:text-white pointer-events-auto cursor-pointer"
+          aria-label="Próxima mídia"
+          title="Próxima"
+          onClick={goNext}
+        >
+          <ChevronRight className="h-6 w-6" />
+        </button>
+      ) : null}
+
       {media.type === 'screenshot' || media.type === 'artwork' ? (
         <ImageZoomViewer
           key={media.url}
           src={media.url}
           capturedAt={formatMediaCapturedAt(media.name, media.createdTime)}
+          onSwipePrev={hasPrev ? goPrev : undefined}
+          onSwipeNext={hasNext ? goNext : undefined}
         />
       ) : media.type === 'video' ? (
         <VideoPlayback
@@ -164,9 +248,54 @@ export const MediaViewerModal: React.FC<MediaViewerModalProps> = ({ media, onClo
           src={videoUrlBesideThumb(media.url, media.thumbnailUrl, media.name)}
           poster={media.thumbnailUrl}
           capturedAt={formatMediaCapturedAt(media.name, media.createdTime)}
+          onSwipePrev={hasPrev ? goPrev : undefined}
+          onSwipeNext={hasNext ? goNext : undefined}
         />
       ) : (
-        <div className="absolute inset-0 flex items-center justify-center p-4">
+        <BackupFileView
+          media={media}
+          onSwipePrev={hasPrev ? goPrev : undefined}
+          onSwipeNext={hasNext ? goNext : undefined}
+        />
+      )}
+    </motion.div>
+  );
+};
+
+function BackupFileView({
+  media,
+  onSwipePrev,
+  onSwipeNext,
+}: {
+  media: GameMedia;
+  onSwipePrev?: () => void;
+  onSwipeNext?: () => void;
+}) {
+  const swipeRef = useRef<{ pointerId: number; x: number; y: number } | null>(null);
+
+  return (
+    <div
+      className="absolute inset-0 flex items-center justify-center p-4"
+      onPointerDown={(event) => {
+        if (event.button !== 0 || (!onSwipePrev && !onSwipeNext)) return;
+        if (event.target instanceof Element && event.target.closest('a, button')) return;
+        swipeRef.current = { pointerId: event.pointerId, x: event.clientX, y: event.clientY };
+      }}
+      onPointerUp={(event) => {
+        const swipe = swipeRef.current;
+        if (!swipe || swipe.pointerId !== event.pointerId) return;
+        swipeRef.current = null;
+        finishHorizontalSwipe(
+          event.clientX - swipe.x,
+          event.clientY - swipe.y,
+          onSwipePrev,
+          onSwipeNext,
+        );
+      }}
+      onPointerCancel={() => {
+        swipeRef.current = null;
+      }}
+    >
           <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-8 text-center max-w-md text-zinc-200">
             <Archive className="w-14 h-14 text-indigo-400 mx-auto mb-4" />
             <p className="text-xs text-zinc-400 mt-1">
@@ -184,10 +313,8 @@ export const MediaViewerModal: React.FC<MediaViewerModalProps> = ({ media, onClo
             )}
           </div>
         </div>
-      )}
-    </motion.div>
   );
-};
+}
 
 function isAbortError(error: unknown) {
   return error instanceof DOMException && error.name === 'AbortError';
@@ -203,50 +330,115 @@ function MediaCapturedAtLabel({ capturedAt }: { capturedAt?: string | null }) {
   );
 }
 
+function finishHorizontalSwipe(
+  dx: number,
+  dy: number,
+  onPrev?: () => void,
+  onNext?: () => void,
+) {
+  if (Math.abs(dx) < SWIPE_MIN_DISTANCE || Math.abs(dx) < Math.abs(dy) * SWIPE_DOMINANCE) {
+    return false;
+  }
+  if (dx < 0) onNext?.();
+  else onPrev?.();
+  return true;
+}
+
 function VideoPlayback({
   src,
   poster,
   capturedAt,
+  onSwipePrev,
+  onSwipeNext,
 }: {
   src: string;
   poster?: string;
   capturedAt?: string | null;
+  onSwipePrev?: () => void;
+  onSwipeNext?: () => void;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const playGenRef = useRef(0);
+  const soundOnRef = useRef(false);
+  const swipeRef = useRef<{ pointerId: number; x: number; y: number } | null>(null);
   const [loading, setLoading] = useState(true);
   const [failed, setFailed] = useState(false);
+  const canSwipe = Boolean(onSwipePrev || onSwipeNext);
+
+  function isVideoControlHit(event: React.PointerEvent) {
+    const video = videoRef.current;
+    if (!video) return false;
+    const target = event.target;
+    if (target instanceof Element && target.closest('button, a, input, textarea')) return true;
+    const rect = video.getBoundingClientRect();
+    return (
+      event.clientY >= rect.bottom - 56 &&
+      event.clientX >= rect.left &&
+      event.clientX <= rect.right
+    );
+  }
 
   const tryPlay = useCallback(async (video: HTMLVideoElement) => {
     const generation = playGenRef.current;
-    const play = async (muted: boolean) => {
-      video.muted = muted;
-      await video.play();
-    };
-
+    if (!soundOnRef.current) {
+      video.muted = true;
+      video.defaultMuted = true;
+    }
     try {
-      await play(false);
+      await video.play();
     } catch (error) {
       if (isAbortError(error) || generation !== playGenRef.current) return;
-      try {
-        await play(true);
-      } catch (mutedError) {
-        if (isAbortError(mutedError) || generation !== playGenRef.current) return;
-        setLoading(false);
-      }
+      setLoading(false);
     }
   }, []);
 
   useEffect(() => {
     playGenRef.current += 1;
+    soundOnRef.current = false;
     setLoading(true);
     setFailed(false);
     const video = videoRef.current;
-    if (video) void tryPlay(video);
-  }, [src, tryPlay]);
+    if (!video) return;
+    if (video.getAttribute('src') !== src) {
+      video.src = src;
+      if (poster) video.poster = poster;
+      else video.removeAttribute('poster');
+      video.load();
+    }
+    void tryPlay(video);
+    return () => {
+      playGenRef.current += 1;
+    };
+  }, [poster, src, tryPlay]);
+
+  useEffect(() => {
+    return () => {
+      releaseMediaElement(videoRef.current);
+    };
+  }, []);
 
   return (
-    <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 p-4 sm:p-10">
+    <div
+      className="absolute inset-0 flex flex-col items-center justify-center gap-3 p-4 sm:p-10"
+      onPointerDown={(event) => {
+        if (!canSwipe || event.button !== 0 || isVideoControlHit(event)) return;
+        swipeRef.current = { pointerId: event.pointerId, x: event.clientX, y: event.clientY };
+      }}
+      onPointerUp={(event) => {
+        const swipe = swipeRef.current;
+        if (!swipe || swipe.pointerId !== event.pointerId) return;
+        swipeRef.current = null;
+        finishHorizontalSwipe(
+          event.clientX - swipe.x,
+          event.clientY - swipe.y,
+          onSwipePrev,
+          onSwipeNext,
+        );
+      }}
+      onPointerCancel={() => {
+        swipeRef.current = null;
+      }}
+    >
       <div
         className="relative w-full max-w-5xl aspect-video rounded-xl overflow-hidden bg-black shadow-2xl"
         aria-busy={loading}
@@ -274,6 +466,8 @@ function VideoPlayback({
           poster={poster}
           controls
           autoPlay
+          muted
+          defaultMuted
           playsInline
           preload="auto"
           onLoadStart={() => {
@@ -284,6 +478,9 @@ function VideoPlayback({
           onPlaying={() => {
             setLoading(false);
             setFailed(false);
+          }}
+          onVolumeChange={(event) => {
+            soundOnRef.current = !event.currentTarget.muted;
           }}
           onCanPlay={(event) => {
             setLoading(false);
@@ -306,7 +503,17 @@ function VideoPlayback({
   );
 }
 
-function ImageZoomViewer({ src, capturedAt }: { src: string; capturedAt?: string | null }) {
+function ImageZoomViewer({
+  src,
+  capturedAt,
+  onSwipePrev,
+  onSwipeNext,
+}: {
+  src: string;
+  capturedAt?: string | null;
+  onSwipePrev?: () => void;
+  onSwipeNext?: () => void;
+}) {
   const viewportRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<{
     pointerId: number;
@@ -324,6 +531,11 @@ function ImageZoomViewer({ src, capturedAt }: { src: string; capturedAt?: string
   const [panning, setPanning] = useState(false);
   const sizedRef = useRef(false);
   const viewModeRef = useRef<'fit' | 'free'>('fit');
+  const scaleRef = useRef(scale);
+  const offsetRef = useRef(offset);
+  const lastTapRef = useRef<{ t: number; x: number; y: number } | null>(null);
+  scaleRef.current = scale;
+  offsetRef.current = offset;
 
   const applyZoom = useCallback(
     (nextScale: number, originX: number, originY: number) => {
@@ -333,9 +545,11 @@ function ImageZoomViewer({ src, capturedAt }: { src: string; capturedAt?: string
       const rect = viewport.getBoundingClientRect();
       const viewX = originX - rect.left;
       const viewY = originY - rect.top;
+      const currentScale = scaleRef.current;
+      const currentOffset = offsetRef.current;
       const clamped = clamp(nextScale, MIN_ZOOM, MAX_ZOOM);
-      const imageX = (viewX - offset.x) / scale;
-      const imageY = (viewY - offset.y) / scale;
+      const imageX = (viewX - currentOffset.x) / currentScale;
+      const imageY = (viewY - currentOffset.y) / currentScale;
       const nextOffset = clampOffset(
         viewX - imageX * clamped,
         viewY - imageY * clamped,
@@ -344,13 +558,16 @@ function ImageZoomViewer({ src, capturedAt }: { src: string; capturedAt?: string
         natural.w,
         natural.h,
         clamped,
+        'pan',
       );
 
       viewModeRef.current = 'free';
+      scaleRef.current = clamped;
+      offsetRef.current = nextOffset;
       setScale(clamped);
       setOffset(nextOffset);
     },
-    [natural.h, natural.w, offset.x, offset.y, scale],
+    [natural.h, natural.w],
   );
 
   const zoomBy = useCallback(
@@ -358,9 +575,9 @@ function ImageZoomViewer({ src, capturedAt }: { src: string; capturedAt?: string
       const viewport = viewportRef.current;
       if (!viewport) return;
       const rect = viewport.getBoundingClientRect();
-      applyZoom(scale * factor, rect.left + rect.width / 2, rect.top + rect.height / 2);
+      applyZoom(scaleRef.current * factor, rect.left + rect.width / 2, rect.top + rect.height / 2);
     },
-    [applyZoom, scale],
+    [applyZoom],
   );
 
   const setActualSize = useCallback(() => {
@@ -368,8 +585,20 @@ function ImageZoomViewer({ src, capturedAt }: { src: string; capturedAt?: string
     if (!viewport || natural.w <= 0) return;
     const rect = viewport.getBoundingClientRect();
     viewModeRef.current = 'free';
+    const nextOffset = clampOffset(
+      (rect.width - natural.w) / 2,
+      (rect.height - natural.h) / 2,
+      rect.width,
+      rect.height,
+      natural.w,
+      natural.h,
+      1,
+      'pan',
+    );
+    scaleRef.current = 1;
+    offsetRef.current = nextOffset;
     setScale(1);
-    setOffset(centeredOffset(rect.width, rect.height, natural.w, natural.h, 1));
+    setOffset(nextOffset);
   }, [natural.h, natural.w]);
 
   const setFit = useCallback(() => {
@@ -377,9 +606,12 @@ function ImageZoomViewer({ src, capturedAt }: { src: string; capturedAt?: string
     if (!viewport || natural.w <= 0) return;
     const rect = viewport.getBoundingClientRect();
     const next = fitScale(rect.width, rect.height, natural.w, natural.h);
+    const nextOffset = centeredOffset(rect.width, rect.height, natural.w, natural.h, next);
     viewModeRef.current = 'fit';
+    scaleRef.current = next;
+    offsetRef.current = nextOffset;
     setScale(next);
-    setOffset(centeredOffset(rect.width, rect.height, natural.w, natural.h, next));
+    setOffset(nextOffset);
   }, [natural.h, natural.w]);
 
   useEffect(() => {
@@ -389,12 +621,12 @@ function ImageZoomViewer({ src, capturedAt }: { src: string; capturedAt?: string
     function onWheel(event: WheelEvent) {
       event.preventDefault();
       const factor = event.deltaY < 0 ? 1.12 : 1 / 1.12;
-      applyZoom(scale * factor, event.clientX, event.clientY);
+      applyZoom(scaleRef.current * factor, event.clientX, event.clientY);
     }
 
     viewport.addEventListener('wheel', onWheel, { passive: false });
     return () => viewport.removeEventListener('wheel', onWheel);
-  }, [applyZoom, scale]);
+  }, [applyZoom]);
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
@@ -425,8 +657,11 @@ function ImageZoomViewer({ src, capturedAt }: { src: string; capturedAt?: string
       if (viewModeRef.current !== 'fit' || natural.w <= 0) return;
       const rect = viewport.getBoundingClientRect();
       const next = fitScale(rect.width, rect.height, natural.w, natural.h);
+      const nextOffset = centeredOffset(rect.width, rect.height, natural.w, natural.h, next);
+      scaleRef.current = next;
+      offsetRef.current = nextOffset;
       setScale(next);
-      setOffset(centeredOffset(rect.width, rect.height, natural.w, natural.h, next));
+      setOffset(nextOffset);
     });
 
     observer.observe(viewport);
@@ -448,58 +683,81 @@ function ImageZoomViewer({ src, capturedAt }: { src: string; capturedAt?: string
     }
     const rect = viewport.getBoundingClientRect();
     const next = fitScale(rect.width, rect.height, width, height);
+    const nextOffset = centeredOffset(rect.width, rect.height, width, height, next);
+    scaleRef.current = next;
+    offsetRef.current = nextOffset;
     setScale(next);
-    setOffset(centeredOffset(rect.width, rect.height, width, height, next));
+    setOffset(nextOffset);
   }, []);
 
   function onPointerDown(event: React.PointerEvent<HTMLDivElement>) {
-    if (event.pointerType === 'touch' && event.currentTarget.hasPointerCapture(event.pointerId)) {
-      return;
-    }
+    if (pinchRef.current) return;
+    if (event.button !== 0) return;
     event.currentTarget.setPointerCapture(event.pointerId);
     dragRef.current = {
       pointerId: event.pointerId,
       startX: event.clientX,
       startY: event.clientY,
-      originX: offset.x,
-      originY: offset.y,
+      originX: offsetRef.current.x,
+      originY: offsetRef.current.y,
     };
     setPanning(true);
   }
 
   function onPointerMove(event: React.PointerEvent<HTMLDivElement>) {
     const drag = dragRef.current;
-    if (!drag || drag.pointerId !== event.pointerId) return;
+    if (!drag || drag.pointerId !== event.pointerId || pinchRef.current) return;
     const viewport = viewportRef.current;
     if (!viewport) return;
     const rect = viewport.getBoundingClientRect();
-    setOffset(
-      clampOffset(
-        drag.originX + (event.clientX - drag.startX),
-        drag.originY + (event.clientY - drag.startY),
-        rect.width,
-        rect.height,
-        natural.w,
-        natural.h,
-        scale,
-      ),
+    const nextOffset = clampOffset(
+      drag.originX + (event.clientX - drag.startX),
+      drag.originY + (event.clientY - drag.startY),
+      rect.width,
+      rect.height,
+      natural.w,
+      natural.h,
+      scaleRef.current,
+      viewModeRef.current === 'fit' ? 'center' : 'pan',
     );
+    offsetRef.current = nextOffset;
+    setOffset(nextOffset);
   }
 
   function endPan(event: React.PointerEvent<HTMLDivElement>) {
-    if (dragRef.current?.pointerId === event.pointerId) {
-      dragRef.current = null;
-      setPanning(false);
+    const drag = dragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    const dx = event.clientX - drag.startX;
+    const dy = event.clientY - drag.startY;
+    dragRef.current = null;
+    setPanning(false);
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
     }
+    if (pinchRef.current) return;
+
+    const moved = Math.hypot(dx, dy);
+    if (moved < 12) {
+      const now = performance.now();
+      const last = lastTapRef.current;
+      if (last && now - last.t < 350 && Math.hypot(event.clientX - last.x, event.clientY - last.y) < 28) {
+        lastTapRef.current = null;
+        setFit();
+        return;
+      }
+      lastTapRef.current = { t: now, x: event.clientX, y: event.clientY };
+      return;
+    }
+
+    lastTapRef.current = null;
+    if (viewModeRef.current !== 'fit') return;
+    finishHorizontalSwipe(dx, dy, onSwipePrev, onSwipeNext);
   }
 
   function onDoubleClick(event: React.MouseEvent<HTMLDivElement>) {
-    const atActual = Math.abs(scale - 1) < 0.02;
-    if (atActual) {
-      setFit();
-      return;
-    }
-    applyZoom(1, event.clientX, event.clientY);
+    event.preventDefault();
+    lastTapRef.current = null;
+    setFit();
   }
 
   function onTouchStart(event: React.TouchEvent<HTMLDivElement>) {
@@ -510,7 +768,7 @@ function ImageZoomViewer({ src, capturedAt }: { src: string; capturedAt?: string
     const [first, second] = [event.touches[0], event.touches[1]];
     pinchRef.current = {
       distance: Math.hypot(second.clientX - first.clientX, second.clientY - first.clientY),
-      scale,
+      scale: scaleRef.current,
     };
   }
 
@@ -569,8 +827,9 @@ function ImageZoomViewer({ src, capturedAt }: { src: string; capturedAt?: string
             height: natural.h ? `${natural.h}px` : 'auto',
             maxWidth: 'none',
             maxHeight: 'none',
-            transform: `translate(${offset.x}px, ${offset.y}px) scale(${scale})`,
+            transform: `translate3d(${offset.x}px, ${offset.y}px, 0) scale(${scale})`,
             transformOrigin: '0 0',
+            willChange: 'transform',
             visibility: loaded ? 'visible' : 'hidden',
             userSelect: 'none',
             pointerEvents: 'none',

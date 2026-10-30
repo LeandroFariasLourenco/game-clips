@@ -7,4 +7,5 @@ compatibility_flags = ["nodejs_compat"]
 [vars]
 AWS_REGION = "us-east-1"
 S3_BUCKET_NAME = "game-clips-assets-306702688592-us-east-1-an"
+PUBLIC_BASE_URL = "https://game-clips-assets-306702688592-us-east-1-an.s3.us-east-1.amazonaws.com"
 CORS_ORIGIN = "*"

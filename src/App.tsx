@@ -1,12 +1,16 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { MotionConfig } from 'motion/react';
-import { Outlet, ScrollRestoration } from 'react-router-dom';
+import { Outlet, ScrollRestoration, useLocation } from 'react-router-dom';
 import { Game } from './types/game';
 import { localLibraryService } from './services/driveService';
-import { LibraryContext, LibraryOutletContext } from './libraryContext';
+import { LibraryContext, LibraryOutletContext, REELS_PATH } from './libraryContext';
+import { AppTabBar } from './components/AppTabBar';
 import { WifiOff } from 'lucide-react';
 
 export default function App() {
+  const location = useLocation();
+  const isReels = location.pathname === REELS_PATH;
+  const showTabBar = location.pathname === '/' || isReels;
   const [games, setGames] = useState<Game[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [isSyncing, setIsSyncing] = useState(true);
@@ -89,10 +93,10 @@ export default function App() {
   return (
     <LibraryContext.Provider value={outletContext}>
     <MotionConfig reducedMotion="user">
-    <div className="min-h-screen bg-[#121212] text-zinc-100 flex flex-col selection:bg-purple-600 selection:text-white overflow-x-clip">
+    <div className={`${isReels ? 'h-dvh overflow-hidden' : 'min-h-screen'} bg-[#121212] text-zinc-100 flex flex-col selection:bg-purple-600 selection:text-white overflow-x-clip`}>
       <ScrollRestoration getKey={(location) => location.pathname} />
 
-      {syncNotification && (
+      {syncNotification && !isReels && (
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-4">
           <div
             className={`px-4 py-2.5 rounded-xl border text-xs flex items-center justify-between shadow-lg transition animate-fadeIn ${
@@ -114,12 +118,22 @@ export default function App() {
         </div>
       )}
 
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-3 sm:py-6">
+      <main
+        className={
+          isReels
+            ? 'relative min-h-0 flex-1 w-full'
+            : `flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-3 sm:py-6 ${
+                showTabBar ? 'pb-[calc(var(--app-tabbar)+0.75rem)]' : ''
+              }`
+        }
+      >
         <Outlet />
       </main>
 
+      {showTabBar ? <AppTabBar /> : null}
+
       {!isOnline && (
-        <div className="fixed bottom-4 left-4 z-50 flex items-center gap-2 rounded-xl bg-amber-600/90 backdrop-blur-md px-3.5 py-2 text-xs font-medium text-white shadow-xl border border-amber-500/40 animate-bounce">
+        <div className={`fixed left-4 z-50 flex items-center gap-2 rounded-xl bg-amber-600/90 backdrop-blur-md px-3.5 py-2 text-xs font-medium text-white shadow-xl border border-amber-500/40 animate-bounce ${showTabBar ? 'bottom-[calc(var(--app-tabbar)+0.75rem)]' : 'bottom-4'}`}>
           <WifiOff className="w-4 h-4 shrink-0" />
           <span>Modo Offline — a listagem usa o cache da biblioteca.</span>
         </div>

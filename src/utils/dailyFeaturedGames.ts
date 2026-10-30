@@ -91,10 +91,14 @@ export function getOrCreateDailyFeaturedGames(
   if (existing) return existing;
 
   const picked = pickDailyFeaturedGames(games, DAILY_FEATURED_COUNT, random);
-  writeDailyFeatured(
-    { date, gameIds: picked.map((game) => game.id) },
-    storage
-  );
+  try {
+    writeDailyFeatured(
+      { date, gameIds: picked.map((game) => game.id) },
+      storage
+    );
+  } catch {
+    // Safari private mode can throw on localStorage writes.
+  }
   return picked;
 }
 

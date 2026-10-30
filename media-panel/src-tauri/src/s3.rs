@@ -645,7 +645,8 @@ async fn read_stored_metadata(settings: &Settings, game: &str) -> Result<Option<
                 .collect()
                 .await
                 .map_err(|error| Error::S3(error.to_string()))?;
-            let text = String::from_utf8_lossy(&collected.into_bytes());
+            let bytes = collected.into_bytes();
+            let text = String::from_utf8_lossy(&bytes);
             Ok(serde_json::from_str::<GameMetadata>(&text).ok())
         }
         Err(error) => {
@@ -742,9 +743,11 @@ pub async fn get_game_metadata(name: String) -> Result<Option<GameMetadata>, Err
 pub async fn refresh_game_metadata(name: String) -> Result<MetadataResult, Error> {
     let game = sanitize_game_name(&name)?;
     let settings = build_client()?;
+    let image_prefix = format!("{game}/images/");
+    let video_prefix = format!("{game}/videos/");
     let (image_objects, video_objects) = tokio::try_join!(
-        list_keys(&settings, &format!("{game}/images/")),
-        list_keys(&settings, &format!("{game}/videos/")),
+        list_keys(&settings, &image_prefix),
+        list_keys(&settings, &video_prefix),
     )?;
     let keys: Vec<String> = image_objects
         .into_iter()
@@ -944,12 +947,14 @@ pub async fn get_game(name: String, refresh: bool) -> Result<GameDetails, Error>
     let banner_key = format!("{game}/{BANNER_FILE}");
     let icon_key = format!("{game}/{ICON_FILE}");
 
+    let image_prefix = format!("{game}/images/");
+    let video_prefix = format!("{game}/videos/");
     let (has_cover, has_banner, has_icon, image_objects, video_objects, metadata) = tokio::try_join!(
         object_exists(&settings, &cover_key),
         object_exists(&settings, &banner_key),
         object_exists(&settings, &icon_key),
-        list_keys(&settings, &format!("{game}/images/")),
-        list_keys(&settings, &format!("{game}/videos/")),
+        list_keys(&settings, &image_prefix),
+        list_keys(&settings, &video_prefix),
         read_stored_metadata(&settings, &game),
     )?;
     let (image_paths, video_paths) = metadata_media_paths(metadata.as_ref());
@@ -1432,9 +1437,10 @@ pub async fn update_media_date(
         .filter(|(from, to)| from != to)
         .collect();
     if changed.is_empty() {
+        let url = media_url(&settings, &next_key);
         return Ok(UploadResult {
             key: next_key,
-            url: media_url(&settings, &next_key),
+            url,
             name: Some(next_name),
         });
     }
@@ -1460,9 +1466,10 @@ pub async fn update_media_date(
 
     refresh_game_metadata(game).await?;
 
+    let url = media_url(&settings, &next_key);
     Ok(UploadResult {
         key: next_key,
-        url: media_url(&settings, &next_key),
+        url,
         name: Some(next_name),
     })
 }

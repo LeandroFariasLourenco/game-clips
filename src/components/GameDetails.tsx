@@ -375,8 +375,17 @@ export const GameDetails: React.FC<GameDetailsProps> = ({ game }) => {
       <AnimatePresence>
         {selectedMedia && (
           <MediaViewerModal
-            key={selectedMedia.id}
             media={selectedMedia}
+            items={
+              activeTab === 'screenshot'
+                ? imagesList
+                : activeTab === 'video'
+                  ? videosList
+                  : activeTab === 'backup'
+                    ? backupsList
+                    : [...imagesList, ...videosList, ...backupsList]
+            }
+            onSelect={openMedia}
             onClose={closeMedia}
           />
         )}

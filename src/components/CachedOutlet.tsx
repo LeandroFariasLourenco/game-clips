@@ -5,6 +5,8 @@ import { Game } from '../types/game';
 import {
   findGameByName,
   HOME_CACHE_KEY,
+  REELS_CACHE_KEY,
+  isPersistentRouteCacheKey,
   resolveRouteCacheKey,
   useLibrary,
 } from '../libraryContext';
@@ -29,14 +31,15 @@ export function CachedOutlet() {
   const cacheRef = useRef(new Map<string, React.ReactNode>());
 
   const isHome = location.pathname === '/' || location.pathname === '';
-  const isGameRoute = Boolean(params.gameName);
+  const isReels = location.pathname === '/reels';
+  const isGameRoute = Boolean(params.gameName) && !isReels;
   const currentGame = useMemo(
-    () => findGameByName(games, params.gameName) ?? null,
-    [games, params.gameName]
+    () => (isReels ? null : findGameByName(games, params.gameName) ?? null),
+    [games, isReels, params.gameName]
   );
 
   const activeKey = resolveRouteCacheKey(location.pathname, params.gameName, games);
-  const canCache = isHome || Boolean(currentGame);
+  const canCache = isHome || isReels || Boolean(currentGame);
 
   if (canCache && activeKey && outlet && !cacheRef.current.has(activeKey)) {
     cacheRef.current.set(
@@ -51,7 +54,7 @@ export function CachedOutlet() {
   const showLiveOutlet = Boolean(outlet) && (!canCache || !activeKey || !cacheRef.current.has(activeKey));
 
   return (
-    <div className="relative">
+    <div className={isReels ? 'relative h-[calc(100dvh-var(--app-tabbar))]' : 'relative'}>
       {cachedPages.map(([cacheKey, node]) => (
         <CachedRouteFrame
           key={cacheKey}
@@ -61,8 +64,8 @@ export function CachedOutlet() {
           {node}
         </CachedRouteFrame>
       ))}
-      {showLiveOutlet && (isGameRoute || isHome) ? outlet : null}
-      {!isHome && !isGameRoute ? outlet : null}
+      {showLiveOutlet && (isGameRoute || isHome || isReels) ? outlet : null}
+      {!isHome && !isGameRoute && !isReels ? outlet : null}
     </div>
   );
 }
@@ -77,10 +80,16 @@ function CachedRouteFrame({
   children: React.ReactNode;
 }) {
   const [visible, setVisible] = useState(isActive);
-  const exitX = cacheKey === HOME_CACHE_KEY ? -28 : 32;
+  const keepMounted = isPersistentRouteCacheKey(cacheKey);
+  const exitX = keepMounted ? -28 : 32;
 
   useEffect(() => {
-    if (isActive) setVisible(true);
+    if (!isActive) return;
+    setVisible(true);
+    const frame = window.requestAnimationFrame(() => {
+      window.dispatchEvent(new Event('resize'));
+    });
+    return () => window.cancelAnimationFrame(frame);
   }, [isActive]);
 
   return (
@@ -93,14 +102,16 @@ function CachedRouteFrame({
       }
       transition={pageTransition}
       onAnimationComplete={() => {
-        if (!isActive) setVisible(false);
+        if (!isActive && !keepMounted) setVisible(false);
       }}
       className={
         isActive
-          ? 'relative z-[1]'
-          : visible
-            ? 'absolute inset-0 z-0 overflow-hidden'
-            : 'hidden'
+          ? `relative z-[1] ${cacheKey === REELS_CACHE_KEY ? 'h-full' : ''}`
+          : keepMounted
+            ? 'fixed inset-x-0 top-0 z-0 w-full opacity-0 pointer-events-none'
+            : visible
+              ? 'absolute inset-0 z-0 overflow-hidden opacity-0'
+              : 'hidden'
       }
       style={{ pointerEvents: isActive ? 'auto' : 'none' }}
       inert={!isActive || undefined}

@@ -21,6 +21,12 @@ export function useLibrary(): LibraryOutletContext {
 }
 
 export const HOME_CACHE_KEY = 'home';
+export const REELS_CACHE_KEY = 'reels';
+export const REELS_PATH = '/reels';
+
+export function isPersistentRouteCacheKey(cacheKey: string): boolean {
+  return cacheKey === HOME_CACHE_KEY || cacheKey === REELS_CACHE_KEY;
+}
 
 export function gameDetailsPath(gameName: string): string {
   return `/${encodeURIComponent(gameName)}`;
@@ -50,6 +56,7 @@ export function resolveRouteCacheKey(
   games: Game[]
 ): string | null {
   if (pathname === '/' || pathname === '') return HOME_CACHE_KEY;
+  if (pathname === REELS_PATH || pathname.endsWith(REELS_PATH)) return REELS_CACHE_KEY;
   const game = findGameByName(games, gameName);
   return game ? gameDetailsCacheKey(game) : null;
 }

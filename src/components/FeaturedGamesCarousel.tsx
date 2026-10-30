@@ -54,6 +54,9 @@ export const FeaturedGamesCarousel: React.FC<FeaturedGamesCarouselProps> = ({
         modules={[Autoplay, Navigation, Pagination]}
         slidesPerView={1}
         spaceBetween={16}
+        observer
+        observeParents
+        watchOverflow
         loop={canLoop}
         autoplay={canLoop ? { delay: 10000, disableOnInteraction: false } : false}
         pagination={canLoop ? { clickable: true } : false}

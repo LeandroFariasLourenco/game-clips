@@ -3,6 +3,7 @@ import { createBrowserRouter, Navigate, RouterProvider } from 'react-router-dom'
 import App from './App.tsx';
 import { CachedOutlet } from './components/CachedOutlet';
 import { HomePage } from './pages/HomePage';
+import { ReelsPage } from './pages/ReelsPage';
 import { GameDetailsPage } from './pages/GameDetailsPage';
 import './index.css';
 
@@ -16,6 +17,7 @@ const router = createBrowserRouter([
         element: <CachedOutlet />,
         children: [
           { index: true, element: <HomePage /> },
+          { path: 'reels', element: <ReelsPage /> },
           { path: ':gameName', element: <GameDetailsPage /> },
           { path: '*', element: <Navigate to="/" replace /> },
         ],

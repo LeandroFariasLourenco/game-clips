@@ -221,6 +221,8 @@ fn lock_main_window(app: &mut tauri::App) {
     };
 
     let size = LogicalSize::new(WINDOW_WIDTH, WINDOW_HEIGHT);
+    let _ = window.set_decorations(false);
+    let _ = window.set_shadow(true);
     let _ = window.set_resizable(false);
     let _ = window.set_maximizable(false);
     let _ = window.set_min_size(Some(size));

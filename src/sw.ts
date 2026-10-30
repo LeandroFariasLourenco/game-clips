@@ -25,6 +25,7 @@ interface MediaWorkerScope {
 const sw = self as unknown as MediaWorkerScope;
 
 const MEDIA_CONCURRENCY = 4;
+const LIVE_MEDIA = new Set(['video', 'audio', 'track']);
 
 let cacheGeneration = 0;
 let activeWarms = 0;
@@ -57,13 +58,24 @@ function isVideoFileUrl(href: string): boolean {
   }
 }
 
-registerRoute(
-  ({ request, url }) =>
-    request.method === 'GET' &&
-    !request.headers.has('range') &&
-    !isVideoFileUrl(url.href) &&
-    isMediaAssetUrl(url.href),
-  ({ request }) => cacheFirstMedia(request),
+function isRangeRequest(request: Request): boolean {
+  return request.headers.has('range') || request.headers.has('Range');
+}
+
+/**
+ * Cache images (covers, screenshots, thumbs). Never intercept video/audio or
+ * Range requests — Firefox reports NS_ERROR_INTERCEPTED when those are claimed
+ * and then aborted by the player.
+ */
+function shouldHandleMediaFetch(request: Request, href: string): boolean {
+  if (request.method !== 'GET') return false;
+  if (LIVE_MEDIA.has(request.destination)) return false;
+  if (isRangeRequest(request) || isVideoFileUrl(href)) return false;
+  return isMediaAssetUrl(href);
+}
+
+registerRoute(({ request, url }) => shouldHandleMediaFetch(request, url.href), ({ request }) =>
+  cacheFirstMedia(request),
 );
 
 sw.addEventListener('install', (event) => {
@@ -122,27 +134,35 @@ function trackWarm(task: Promise<void>): Promise<void> {
   });
 }
 
+function canStoreMediaResponse(response: Response): boolean {
+  if (response.type === 'error') return false;
+  if (response.type === 'opaque') return true;
+  return response.ok && response.status === 200;
+}
+
 async function cacheFirstMedia(request: Request, generation: number | null = null): Promise<Response> {
   const cache = await caches.open(MEDIA_CACHE_NAME);
-  const cached = await cache.match(request, { ignoreVary: true });
-  if (cached) return cached;
+  const cached = await cache.match(request.url);
+  if (cached && (cached.ok || cached.type === 'opaque')) return cached;
   if (generation !== null && generation !== cacheGeneration) {
     return fetch(request);
   }
 
   try {
-    const response = await fetch(request.url, { mode: 'cors', credentials: 'omit' });
-    if (response.ok && response.status !== 206 && (generation === null || generation === cacheGeneration)) {
+    const response = await fetch(request);
+    if (canStoreMediaResponse(response) && (generation === null || generation === cacheGeneration)) {
       await cache.put(request.url, response.clone());
     }
     return response;
-  } catch {
-    return fetch(request);
+  } catch (error) {
+    const fallback = await cache.match(request.url);
+    if (fallback && (fallback.ok || fallback.type === 'opaque')) return fallback;
+    throw error;
   }
 }
 
 async function warmMediaUrls(urls: string[], generation: number): Promise<void> {
-  const queue = [...new Set(urls.filter((url) => isMediaAssetUrl(url)))];
+  const queue = [...new Set(urls.filter((url) => isMediaAssetUrl(url) && !isVideoFileUrl(url)))];
   if (queue.length === 0) return;
 
   let index = 0;
@@ -151,7 +171,7 @@ async function warmMediaUrls(urls: string[], generation: number): Promise<void> 
       const url = queue[index];
       index += 1;
       try {
-        await cacheFirstMedia(new Request(url), generation);
+        await cacheFirstMedia(new Request(url, { mode: 'cors', credentials: 'omit' }), generation);
       } catch {
         // A missing cover should not stop the rest of the library.
       }

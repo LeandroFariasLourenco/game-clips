@@ -107,6 +107,7 @@ const paths = {
   check: (
     <polyline points="20 6 9 17 4 12" />
   ),
+  minus: <line x1="5" y1="12" x2="19" y2="12" />,
   x: (
     <>
       <line x1="18" y1="6" x2="6" y2="18" />

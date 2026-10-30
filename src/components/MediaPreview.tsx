@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { ShimmerImage } from '../directives/ShimmerImage';
+import { releaseMediaElement } from '../utils/releaseMediaElement';
 
 export type MediaPreviewKind = 'image' | 'video';
 
@@ -29,6 +30,7 @@ export const MediaPreview: React.FC<MediaPreviewProps> = ({
   autoPlay = false,
 }) => {
   const rootRef = useRef<HTMLDivElement>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
   const [visible, setVisible] = useState(false);
   const [imageFailed, setImageFailed] = useState(false);
 
@@ -46,6 +48,13 @@ export const MediaPreview: React.FC<MediaPreviewProps> = ({
     observer.observe(node);
     return () => observer.disconnect();
   }, []);
+
+  const setVideoNode = (node: HTMLVideoElement | null) => {
+    if (videoRef.current && videoRef.current !== node) {
+      releaseMediaElement(videoRef.current);
+    }
+    videoRef.current = node;
+  };
 
   useEffect(() => {
     setImageFailed(false);
@@ -86,12 +95,13 @@ export const MediaPreview: React.FC<MediaPreviewProps> = ({
 
       {kind === 'video' && visible && (
         <video
+          ref={setVideoNode}
           key={src}
           src={src}
           muted
           loop={autoPlay}
           playsInline
-          preload="auto"
+          preload="metadata"
           autoPlay={autoPlay}
           onLoadedMetadata={(event) => {
             seekPreviewFrame(event.currentTarget);

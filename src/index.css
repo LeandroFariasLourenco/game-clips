@@ -1,5 +1,9 @@
 @import "tailwindcss";
 
+:root {
+  --app-tabbar: calc(3.25rem + env(safe-area-inset-bottom, 0px));
+}
+
 .image-shimmer {
   position: absolute;
   inset: 0;
@@ -57,6 +61,10 @@
 .featured-games-carousel .swiper {
   padding-bottom: 1.35rem;
   overflow: hidden;
+}
+
+.featured-games-carousel .swiper-slide {
+  height: auto;
 }
 
 @media (min-width: 640px) {

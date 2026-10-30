@@ -16,7 +16,7 @@ Mudança de listagem, upload ou `metadata.json` precisa ser aplicada nos **dois*
 
 ## Janela
 
-Layout **fixo 1024×768**, não redimensionável (`src-tauri/tauri.conf.json` e `src-tauri/src/lib.rs`). UI e CSS assumem essa viewport: não introduza layouts fluidos de desktop amplo.
+Janela **fixa 1024×768**, não redimensionável e sem maximizar (`src-tauri/tauri.conf.json` e `src-tauri/src/lib.rs`). Sem barra nativa do SO (`decorations: false`). A barra customizada é `TitleBar` (arrastar, minimizar, fechar). O miolo (`.shell`) preenche o restante com `100%` da webview — não fixe `.shell` nem `.main` em 1024×768, senão a barra e a borda do sistema cortam o conteúdo. Não introduza layouts fluidos de desktop amplo.
 
 ## Bucket (contrato com o client)
 

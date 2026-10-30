@@ -4,6 +4,8 @@ type ShimmerImageProps = React.ImgHTMLAttributes<HTMLImageElement> & {
   wrapperClassName?: string;
 };
 
+const paintedSources = new Set<string>();
+
 /**
  * React equivalent of an Angular attribute directive on `<img>`.
  * Keeps a shimmer skeleton over the image until it has painted.
@@ -18,10 +20,15 @@ export const ShimmerImage: React.FC<ShimmerImageProps> = ({
   ...imgProps
 }) => {
   const imageRef = useRef<HTMLImageElement>(null);
-  const [loaded, setLoaded] = useState(false);
+  const [loaded, setLoaded] = useState(() => Boolean(src && paintedSources.has(src)));
   const [failed, setFailed] = useState(false);
 
   useEffect(() => {
+    if (src && paintedSources.has(src)) {
+      setLoaded(true);
+      setFailed(false);
+      return;
+    }
     setLoaded(false);
     setFailed(false);
   }, [src]);
@@ -45,6 +52,7 @@ export const ShimmerImage: React.FC<ShimmerImageProps> = ({
           src={src}
           alt={alt}
           onLoad={(event) => {
+            if (src) paintedSources.add(src);
             setLoaded(true);
             onLoad?.(event);
           }}

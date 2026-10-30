@@ -23,14 +23,18 @@ import { isMediaAssetUrl } from '../services/mediaAssetUrl';
 import { collectGameMediaCacheUrls } from '../services/mediaCache';
 import {
   HOME_CACHE_KEY,
+  REELS_CACHE_KEY,
   findGameByName,
   gameDetailsCacheKey,
   gameDetailsPath,
+  isPersistentRouteCacheKey,
   resolveRouteCacheKey,
 } from '../libraryContext';
+import { allMediaFromMetadata } from './featuredMedia';
+import { classifyReelWatch, orderedGamesForReel, pickReelMedia } from './reelFeed';
 import { localAssetService } from '../services/driveAssetService';
 import { mapListedImagesToMedia, mapListedVideosToMedia } from '../services/driveService';
-import { parseMediaCapturedAt } from './mediaSort';
+import { formatMediaCapturedAt, parseMediaCapturedAt } from './mediaSort';
 import {
   FEATURED_COUNT,
   FEATURED_ROTATION_MS,
@@ -434,7 +438,7 @@ test('media URLs always point to the public bucket', () => {
   );
   assert.equal(
     legacyVideo[0].url,
-    `${DEFAULT_MEDIA_WORKER_URL}/Battlefield%206/videos/ClipedeMomentsdeOct102026%20(5)/ClipedeMomentsdeOct102026%20(5).mp4`
+    `${DEFAULT_MEDIA_BUCKET_URL}/Battlefield%206/videos/ClipedeMomentsdeOct102026%20(5)/ClipedeMomentsdeOct102026%20(5).mp4`
   );
   assert.equal(
     videoUrlBesideThumb(
@@ -442,7 +446,7 @@ test('media URLs always point to the public bucket', () => {
       `${DEFAULT_MEDIA_WORKER_URL}/FIFA%2015/videos/clip/thumb.jpg`,
       'clip.mp4',
     ),
-    `${DEFAULT_MEDIA_WORKER_URL}/FIFA%2015/videos/clip/clip.mp4`
+    `${DEFAULT_MEDIA_BUCKET_URL}/FIFA%2015/videos/clip/clip.mp4`
   );
   const hashed =
     `${DEFAULT_MEDIA_WORKER_URL}/Aliens%20Dark%20Descent/videos/` +
@@ -459,7 +463,7 @@ test('media URLs always point to the public bucket', () => {
         '2026-02-28T132540Z_Aliens%20Dark%20Descent%231/thumb.jpg',
       '2026-02-28T132540Z_Aliens Dark Descent#1.mp4',
     ),
-    `${DEFAULT_MEDIA_WORKER_URL}/Aliens%20Dark%20Descent/videos/` +
+    `${DEFAULT_MEDIA_BUCKET_URL}/Aliens%20Dark%20Descent/videos/` +
       '2026-02-28T132540Z_Aliens%20Dark%20Descent%231/2026-02-28T132540Z_Aliens%20Dark%20Descent%231.mp4',
   );
 });
@@ -488,6 +492,50 @@ test('route cache keys keep home stable and details keyed by game name', () => {
   assert.equal(gameDetailsCacheKey(games[1]), 'FIFA 15');
   assert.equal(findGameByName(games, 'FIFA 15')?.name, 'FIFA 15');
   assert.equal(resolveRouteCacheKey('/missing', 'missing', games), null);
+  assert.equal(resolveRouteCacheKey('/reels', 'reels', games), REELS_CACHE_KEY);
+  assert.equal(isPersistentRouteCacheKey(HOME_CACHE_KEY), true);
+  assert.equal(isPersistentRouteCacheKey(REELS_CACHE_KEY), true);
+  assert.equal(isPersistentRouteCacheKey('Agario'), false);
+});
+
+test('reel recommendations keep the same game after a complete watch and switch after a skip', () => {
+  const games: Game[] = [
+    { id: 'a', name: 'A', playTimeMinutes: 0, subfolderName: 'A' },
+    { id: 'b', name: 'B', playTimeMinutes: 0, subfolderName: 'B' },
+    { id: 'c', name: 'C', playTimeMinutes: 0, subfolderName: 'C' },
+  ];
+
+  assert.equal(classifyReelWatch(true), 'completed');
+  assert.equal(classifyReelWatch(false), 'skipped');
+
+  const completed = orderedGamesForReel(games, {
+    lastGameId: 'b',
+    outcome: 'completed',
+    random: () => 0,
+  });
+  assert.equal(completed[0].id, 'b');
+  assert.equal(completed.length, 3);
+
+  const skipped = orderedGamesForReel(games, {
+    lastGameId: 'b',
+    outcome: 'skipped',
+    random: () => 0,
+  });
+  assert.equal(skipped.at(-1)?.id, 'b');
+  assert.ok(skipped.slice(0, -1).every((game) => game.id !== 'b'));
+
+  const media = allMediaFromMetadata(games[0], {
+    images: ['https://cdn.example/A/images/one.jpg', 'https://cdn.example/A/images/two.jpg'],
+    videos: [{ url: 'https://cdn.example/A/videos/clip/clip.mp4', thumb: 'https://cdn.example/A/videos/clip/thumb.jpg' }],
+  });
+  assert.equal(media.length, 3);
+  assert.equal(pickReelMedia(media, [media[0].id, media[2].id], () => 0)?.id, media[1].id);
+
+  const dated = allMediaFromMetadata(games[0], {
+    images: ['https://cdn.example/A/images/2026-10-30T121500Z_A#1.jpg'],
+    videos: [],
+  });
+  assert.equal(formatMediaCapturedAt(dated[0].name, dated[0].createdTime)?.includes('2026'), true);
 });
 
 test('daily featured games persist for the local day and are hidden from the listing', () => {

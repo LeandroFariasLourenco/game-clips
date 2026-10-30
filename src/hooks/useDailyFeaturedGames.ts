@@ -23,10 +23,14 @@ export function useDailyFeaturedGames(games: Game[]): {
 
   const featured = useMemo(() => {
     if (games.length === 0) return [];
-    if (typeof localStorage === 'undefined') {
+    try {
+      if (typeof localStorage === 'undefined') {
+        return pickDailyFeaturedGames(games);
+      }
+      return getOrCreateDailyFeaturedGames(games, localStorage);
+    } catch {
       return pickDailyFeaturedGames(games);
     }
-    return getOrCreateDailyFeaturedGames(games, localStorage);
   }, [games, dateKey]);
 
   return {

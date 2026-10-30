@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import { Autoplay, Navigation } from 'swiper/modules';
 import { Swiper, SwiperSlide } from 'swiper/react';
@@ -10,6 +10,7 @@ import { FeaturedHighlight } from '../utils/featuredMedia';
 import { ShimmerImage } from '../directives/ShimmerImage';
 import { MediaViewerModal } from './MediaViewerModal';
 import { pageTransition } from '../motion';
+import { releaseMediaElement } from '../utils/releaseMediaElement';
 import 'swiper/css';
 import 'swiper/css/navigation';
 
@@ -79,6 +80,8 @@ export const FeaturedMediaReels: React.FC<FeaturedMediaReelsProps> = ({ items })
         spaceBetween={10}
         centeredSlides
         centerInsufficientSlides
+        observer
+        observeParents
         watchOverflow
         loop={canLoop}
         autoplay={
@@ -118,7 +121,9 @@ export const FeaturedMediaReels: React.FC<FeaturedMediaReelsProps> = ({ items })
       >
         {items.map((item) => (
           <SwiperSlide key={item.media.id}>
-            <ReelCard item={item} onOpen={() => setSelected(item.media)} />
+            {({ isActive }) => (
+              <ReelCard item={item} active={isActive} onOpen={() => setSelected(item.media)} />
+            )}
           </SwiperSlide>
         ))}
       </Swiper>
@@ -126,8 +131,9 @@ export const FeaturedMediaReels: React.FC<FeaturedMediaReelsProps> = ({ items })
       <AnimatePresence>
         {selected && (
           <MediaViewerModal
-            key={selected.id}
             media={selected}
+            items={items.map((item) => item.media)}
+            onSelect={setSelected}
             onClose={() => setSelected(null)}
           />
         )}
@@ -136,10 +142,43 @@ export const FeaturedMediaReels: React.FC<FeaturedMediaReelsProps> = ({ items })
   );
 };
 
+function FeaturedReelVideo({ src, poster }: { src: string; poster?: string }) {
+  const videoRef = useRef<HTMLVideoElement>(null);
+
+  const setVideoNode = (node: HTMLVideoElement | null) => {
+    if (videoRef.current && videoRef.current !== node) {
+      releaseMediaElement(videoRef.current);
+    }
+    videoRef.current = node;
+  };
+
+  useEffect(() => {
+    const video = videoRef.current;
+    if (video) playReelVideo(video);
+  }, [src]);
+
+  return (
+    <video
+      ref={setVideoNode}
+      src={src}
+      poster={poster}
+      muted
+      loop
+      playsInline
+      preload="metadata"
+      onCanPlay={(event) => {
+        if (isActiveReelVideo(event.currentTarget)) playReelVideo(event.currentTarget);
+      }}
+      className="reel-video reel-kenburns absolute inset-0 h-full w-full object-cover transition-opacity duration-500"
+    />
+  );
+}
+
 const ReelCard: React.FC<{
   item: FeaturedHighlight;
+  active?: boolean;
   onOpen: () => void;
-}> = ({ item, onOpen }) => {
+}> = ({ item, active = false, onOpen }) => {
   const isVideo = item.media.type === 'video';
   const preview = isVideo ? item.media.thumbnailUrl : item.media.url || item.media.thumbnailUrl;
 
@@ -162,20 +201,9 @@ const ReelCard: React.FC<{
         <div className="absolute inset-0 bg-zinc-900" />
       )}
 
-      {isVideo && item.media.url && (
-        <video
-          src={sanitizeVideoSrc(item.media.url)}
-          poster={preview}
-          muted
-          loop
-          playsInline
-          preload="auto"
-          onCanPlay={(event) => {
-            if (isActiveReelVideo(event.currentTarget)) playReelVideo(event.currentTarget);
-          }}
-          className="reel-video reel-kenburns absolute inset-0 h-full w-full object-cover transition-opacity duration-500"
-        />
-      )}
+      {isVideo && item.media.url && active ? (
+        <FeaturedReelVideo src={sanitizeVideoSrc(item.media.url)} poster={preview} />
+      ) : null}
 
       <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/85 via-black/5 to-black/25" />
 

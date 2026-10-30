@@ -1,6 +1,7 @@
 import { sanitizeVideoSrc } from '../config/mediaConfig';
 import { Game, GameMedia } from '../types/game';
 import { fileNameFromUrl, shuffleInPlace } from './featuredRotation';
+import { parseMediaCapturedAt } from './mediaSort';
 
 export const FEATURED_MEDIA_LIMIT = 2;
 
@@ -74,6 +75,10 @@ function mimeFromName(name: string, kind: 'image' | 'video'): string {
   return 'image/jpeg';
 }
 
+function capturedTime(name: string): string | undefined {
+  return parseMediaCapturedAt(name)?.toISOString();
+}
+
 function imageMedia(game: Game, url: string): GameMedia {
   const name = fileNameFromUrl(url);
   return {
@@ -85,6 +90,7 @@ function imageMedia(game: Game, url: string): GameMedia {
     size: 0,
     url,
     thumbnailUrl: url,
+    createdTime: capturedTime(name),
   };
 }
 
@@ -100,6 +106,7 @@ function videoMedia(game: Game, clip: GameMetadataVideo): GameMedia {
     size: 0,
     url,
     thumbnailUrl: clip.thumb ? sanitizeVideoSrc(clip.thumb) : undefined,
+    createdTime: capturedTime(name),
   };
 }
 
@@ -111,6 +118,13 @@ function mixKinds(images: GameMedia[], videos: GameMedia[]): GameMedia[] {
     if (images[index]) mixed.push(images[index]);
   }
   return mixed;
+}
+
+export function allMediaFromMetadata(game: Game, metadata: GameMetadata): GameMedia[] {
+  return [
+    ...metadata.images.map((url) => imageMedia(game, url)),
+    ...metadata.videos.map((clip) => videoMedia(game, clip)),
+  ];
 }
 
 export function pickGameFeaturedMedia(

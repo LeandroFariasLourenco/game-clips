@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ComponentProps, type CSSProperties, type DragEvent as ReactDragEvent, type MouseEvent, type ReactNode } from "react";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import {
   assetUrl,
@@ -337,7 +338,8 @@ function App() {
     };
   }, []);
 
-  const detailsReady = Boolean(details && details.name === selectedName);
+  const readyDetails = details && details.name === selectedName ? details : null;
+  const detailsReady = readyDetails !== null;
   const showDetailsShimmer = Boolean(selectedName && !detailsReady && !error);
   function canRemoveGame(name: string): boolean {
     if (details?.name !== name) return true;
@@ -483,7 +485,9 @@ function App() {
   }
 
   return (
-    <div className="shell">
+    <div className="app-frame">
+      <TitleBar />
+      <div className="shell">
       <aside className="sidebar">
         <header className="sidebar-header">
           <div className="header-actions">
@@ -622,8 +626,8 @@ function App() {
             <div className="details-toolbar">
               <div className="details-game">
                 <h2 key={selectedName}>{selectedName}</h2>
-                {detailsReady ? (
-                  <GameMetadataBadge present={details.hasMetadata === true} />
+                {readyDetails ? (
+                  <GameMetadataBadge present={readyDetails.hasMetadata === true} />
                 ) : showDetailsShimmer ? (
                   <span className="shimmer shimmer-badge" aria-hidden="true" />
                 ) : null}
@@ -641,21 +645,21 @@ function App() {
 
             {showDetailsShimmer && <DetailsShimmer />}
 
-            {detailsReady && (
+            {readyDetails && (
               <div className="details-enter">
                 <BrandingAccordion
                   key={`${selectedName}-branding`}
-                  coverPresent={details.hasCover}
-                  bannerPresent={details.hasBanner}
-                  iconPresent={details.hasIcon}
+                  coverPresent={readyDetails.hasCover}
+                  bannerPresent={readyDetails.hasBanner}
+                  iconPresent={readyDetails.hasIcon}
                 >
                   <section className="cards">
                     <AssetCard
                       variant="cover"
                       title="Capa"
                       fileName="cover.jpg"
-                      present={details.hasCover}
-                      src={assetUrl(`${details.name}/cover.jpg`, details.coverUrl)}
+                      present={readyDetails.hasCover}
+                      src={assetUrl(`${readyDetails.name}/cover.jpg`, readyDetails.coverUrl)}
                       busy={uploading === "cover"}
                       onUpload={() => void handleUpload("cover")}
                       onSteamGrid={() => setSteamGridKind("cover")}
@@ -664,8 +668,8 @@ function App() {
                       variant="banner"
                       title="Banner"
                       fileName="banner.jpg"
-                      present={details.hasBanner}
-                      src={assetUrl(`${details.name}/banner.jpg`, details.bannerUrl)}
+                      present={readyDetails.hasBanner}
+                      src={assetUrl(`${readyDetails.name}/banner.jpg`, readyDetails.bannerUrl)}
                       busy={uploading === "banner"}
                       onUpload={() => void handleUpload("banner")}
                       onSteamGrid={() => setSteamGridKind("banner")}
@@ -674,8 +678,8 @@ function App() {
                       variant="icon"
                       title="Ícone"
                       fileName="icon.png"
-                      present={details.hasIcon}
-                      src={assetUrl(`${details.name}/icon.png`, details.iconUrl)}
+                      present={readyDetails.hasIcon}
+                      src={assetUrl(`${readyDetails.name}/icon.png`, readyDetails.iconUrl)}
                       busy={uploading === "icon"}
                       onUpload={() => void handleUpload("icon")}
                       onSteamGrid={() => setSteamGridKind("icon")}
@@ -688,7 +692,7 @@ function App() {
                   key={`${selectedName}-image`}
                   kind="image"
                   title="Imagens"
-                  countLabel={metadataCountLabel("arquivo(s) em images/", details.images)}
+                  countLabel={metadataCountLabel("arquivo(s) em images/", readyDetails.images)}
                   hint="Arraste uma ou mais imagens .jpg ou .png para esta área."
                   busy={uploading !== null || removing || pendingUpload !== null}
                   nativeMode={nativeDrop?.kind === "image" ? nativeDrop.mode : null}
@@ -701,11 +705,11 @@ function App() {
                     )
                   }
                 >
-                  {details.images.length > 0 && (
+                  {readyDetails.images.length > 0 && (
                     <MediaFilesTable
                       kind="image"
-                      files={details.images}
-                      hasMetadata={details.hasMetadata}
+                      files={readyDetails.images}
+                      hasMetadata={readyDetails.hasMetadata}
                       menuKey={fileMenu?.file.key}
                       onContextMenu={(event, file) => {
                         if (removing || uploading !== null) return;
@@ -722,7 +726,7 @@ function App() {
                   key={`${selectedName}-video`}
                   kind="video"
                   title="Vídeos"
-                  countLabel={metadataCountLabel("vídeo(s) em videos/", details.videos)}
+                  countLabel={metadataCountLabel("vídeo(s) em videos/", readyDetails.videos)}
                   hint="Arraste um ou mais vídeos .mp4 para esta área."
                   busy={uploading !== null || removing || pendingUpload !== null}
                   nativeMode={nativeDrop?.kind === "video" ? nativeDrop.mode : null}
@@ -735,11 +739,11 @@ function App() {
                     )
                   }
                 >
-                  {details.videos.length > 0 && (
+                  {readyDetails.videos.length > 0 && (
                     <MediaFilesTable
                       kind="video"
-                      files={details.videos}
-                      hasMetadata={details.hasMetadata}
+                      files={readyDetails.videos}
+                      hasMetadata={readyDetails.hasMetadata}
                       menuKey={fileMenu?.file.key}
                       onContextMenu={(event, file) => {
                         if (removing || uploading !== null) return;
@@ -913,7 +917,48 @@ function App() {
           }}
         />
       )}
+      </div>
     </div>
+  );
+}
+
+function TitleBar() {
+  function onDrag(event: MouseEvent<HTMLDivElement>) {
+    if (event.button !== 0 || !isTauri()) return;
+    event.preventDefault();
+    void getCurrentWindow().startDragging();
+  }
+
+  return (
+    <header className="titlebar">
+      <div className="titlebar-drag" onMouseDown={onDrag}>
+        <span className="titlebar-title">Game clips admin panel</span>
+      </div>
+      <div className="titlebar-controls">
+        <button
+          type="button"
+          className="titlebar-btn"
+          aria-label="Minimizar"
+          title="Minimizar"
+          onClick={() => {
+            if (isTauri()) void getCurrentWindow().minimize();
+          }}
+        >
+          <Icon name="minus" />
+        </button>
+        <button
+          type="button"
+          className="titlebar-btn close"
+          aria-label="Fechar"
+          title="Fechar"
+          onClick={() => {
+            if (isTauri()) void getCurrentWindow().close();
+          }}
+        >
+          <Icon name="x" />
+        </button>
+      </div>
+    </header>
   );
 }
 
@@ -987,8 +1032,8 @@ function FileContextMenu({
   onRename?: () => void;
 }) {
   const itemCount = 1 + (onEditDate ? 1 : 0) + (onRename ? 1 : 0);
-  const left = Math.max(8, Math.min(x, 1024 - 176));
-  const top = Math.max(8, Math.min(y, 768 - (12 + itemCount * 40)));
+  const left = Math.max(8, Math.min(x, window.innerWidth - 200));
+  const top = Math.max(8, Math.min(y, window.innerHeight - (12 + itemCount * 40)));
 
   useEffect(() => {
     function onKey(event: KeyboardEvent) {

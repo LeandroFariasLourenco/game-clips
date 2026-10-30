@@ -91,7 +91,9 @@ async function handle(request, env, allowOrigin) {
       if (rest.some((segment) => segment === ".." || segment === ".")) {
         return json({ error: "Caminho inválido" }, 400, allowOrigin);
       }
-      return serveObject(request, env, allowOrigin, `${game}/videos/${rest.join("/")}`);
+      return serveObject(request, env, allowOrigin, `${game}/videos/${rest.join("/")}`, {
+        redirectLarge: true,
+      });
     }
   }
 
@@ -209,9 +211,9 @@ async function serveListing(request, env, allowOrigin, game, folder) {
 
 async function serveVideoListing(request, env, allowOrigin, game) {
   const prefix = `${game}/videos/`;
-  const base = `${originBase(request)}/${encodePath(game)}`;
+  const base = publicBase(env);
   const objects = await listAllKeys(env, prefix);
-  const clips = groupVideoClips(objects, prefix, base);
+  const clips = groupVideoClips(objects, prefix, `${base}/${encodePath(game)}`);
   return json({ videos: clips }, 200, allowOrigin);
 }
 
@@ -310,16 +312,31 @@ function isVideoFile(fileName) {
 }
 
 async function serveObject(request, env, allowOrigin, key, options = {}) {
-  const range = request.headers.get("Range");
-  const object = await client(env).send(
-    new GetObjectCommand({
-      Bucket: env.S3_BUCKET_NAME,
-      Key: key,
-      Range: range || undefined,
-    })
-  );
-
   const fileName = key.split("/").pop() || key;
+  if (options.redirectLarge && isVideoFile(fileName)) {
+    const headers = new Headers(corsHeaders(allowOrigin));
+    headers.set("Location", publicObjectUrl(env, key));
+    headers.set("Cache-Control", "public, max-age=300");
+    return new Response(null, { status: 302, headers });
+  }
+
+  const range = request.headers.get("Range");
+  let object;
+  try {
+    object = await client(env).send(
+      new GetObjectCommand({
+        Bucket: env.S3_BUCKET_NAME,
+        Key: key,
+        Range: range || undefined,
+      })
+    );
+  } catch (error) {
+    if (error?.name === "InvalidRange" || error?.$metadata?.httpStatusCode === 416) {
+      return new Response(null, { status: 416, headers: corsHeaders(allowOrigin) });
+    }
+    throw error;
+  }
+
   const headers = new Headers(corsHeaders(allowOrigin));
   headers.set("Content-Type", object.ContentType || mimeOf(fileName));
   headers.set("Accept-Ranges", "bytes");
@@ -389,6 +406,16 @@ function isMissing(error) {
 
 function encodePath(path) {
   return path.split("/").filter(Boolean).map(encodeURIComponent).join("/");
+}
+
+function publicBase(env) {
+  const configured = env.PUBLIC_BASE_URL?.trim();
+  if (configured) return configured.replace(/\/+$/, "");
+  return `https://${env.S3_BUCKET_NAME}.s3.${env.AWS_REGION}.amazonaws.com`;
+}
+
+function publicObjectUrl(env, key) {
+  return `${publicBase(env)}/${encodePath(key)}`;
 }
 
 function originBase(request) {
