@@ -103,6 +103,14 @@ export function parseMasterJsonToGames(jsonContent: string): Game[] {
         typeof item.cover === 'string' && item.cover.trim()
           ? item.cover.trim()
           : undefined;
+      const banner =
+        typeof item.banner === 'string' && item.banner.trim()
+          ? item.banner.trim()
+          : undefined;
+      const icon =
+        typeof item.icon === 'string' && item.icon.trim()
+          ? item.icon.trim()
+          : undefined;
 
       return {
         id: item.id || (steamAppId ? `steam-${steamAppId}` : `game-${slugId}`),
@@ -115,6 +123,8 @@ export function parseMasterJsonToGames(jsonContent: string): Game[] {
         releaseYear: item.releaseYear || item.ReleaseYear,
         subfolderName,
         cover,
+        banner,
+        icon,
       };
     });
   } catch (err) {

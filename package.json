@@ -16,6 +16,8 @@
     "media:names": "node scripts/prepare-media-names.cjs",
     "media:folders": "node scripts/prepare-media-video-folders.cjs",
     "media:thumbs": "node scripts/prepare-media-thumbs.cjs",
+    "media:faststart": "node scripts/prepare-media-faststart.cjs",
+    "media:clip": "node scripts/prepare-clip-file.cjs",
     "media:metadata": "node scripts/prepare-media-metadata.cjs"
   },
   "dependencies": {

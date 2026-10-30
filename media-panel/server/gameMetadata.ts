@@ -1,6 +1,7 @@
 import { extname } from "node:path";
 
 export const METADATA_FILE = "metadata.json";
+export const DEFAULT_PUBLIC_ASSET_BASE_URL = "https://d3nyc65v53ljin.cloudfront.net";
 export const VIDEO_THUMB_FILE = "thumb.jpg";
 export const IMAGE_EXTENSIONS = new Set([".jpg", ".jpeg", ".png"]);
 export const VIDEO_EXTENSION = ".mp4";
@@ -35,8 +36,17 @@ function encodePath(segments: string[]): string {
     .join("/");
 }
 
+/** Public CDN used in metadata.json URLs. Env wins so the distribution can change later. */
+export function resolvePublicAssetBaseUrl(...candidates: Array<string | null | undefined>): string {
+  for (const raw of candidates) {
+    const value = raw?.trim().replace(/^["']|["']$/g, "").replace(/\/+$/, "");
+    if (value) return value;
+  }
+  return DEFAULT_PUBLIC_ASSET_BASE_URL;
+}
+
 export function mediaFileUrl(publicBaseUrl: string, game: string, relativePath: string): string {
-  const base = publicBaseUrl.replace(/\/+$/, "");
+  const base = resolvePublicAssetBaseUrl(publicBaseUrl);
   return `${base}/${encodePath([game, relativePath])}`;
 }
 

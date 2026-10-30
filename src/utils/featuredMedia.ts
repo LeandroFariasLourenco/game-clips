@@ -1,4 +1,4 @@
-import { sanitizeVideoSrc } from '../config/mediaConfig';
+import { sanitizeVideoSrc, toPublicAssetUrl } from '../config/mediaConfig';
 import { Game, GameMedia } from '../types/game';
 import { fileNameFromUrl, shuffleInPlace } from './featuredRotation';
 import { parseMediaCapturedAt } from './mediaSort';
@@ -80,32 +80,33 @@ function capturedTime(name: string): string | undefined {
 }
 
 function imageMedia(game: Game, url: string): GameMedia {
-  const name = fileNameFromUrl(url);
+  const src = toPublicAssetUrl(url);
+  const name = fileNameFromUrl(src);
   return {
-    id: `highlight-${game.id}-image-${name}`,
+    id: `image-${game.id}-${name}`,
     gameId: game.id,
     name,
     type: 'screenshot',
     mimeType: mimeFromName(name, 'image'),
     size: 0,
-    url,
-    thumbnailUrl: url,
+    url: src,
+    thumbnailUrl: src,
     createdTime: capturedTime(name),
   };
 }
 
 function videoMedia(game: Game, clip: GameMetadataVideo): GameMedia {
-  const url = sanitizeVideoSrc(clip.url);
+  const url = toPublicAssetUrl(sanitizeVideoSrc(clip.url));
   const name = fileNameFromUrl(url);
   return {
-    id: `highlight-${game.id}-video-${name}`,
+    id: `video-${game.id}-${name}`,
     gameId: game.id,
     name,
     type: 'video',
     mimeType: mimeFromName(name, 'video'),
     size: 0,
     url,
-    thumbnailUrl: clip.thumb ? sanitizeVideoSrc(clip.thumb) : undefined,
+    thumbnailUrl: clip.thumb ? toPublicAssetUrl(sanitizeVideoSrc(clip.thumb)) : undefined,
     createdTime: capturedTime(name),
   };
 }

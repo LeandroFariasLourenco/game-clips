@@ -1,23 +1,27 @@
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import path from 'path';
-import { defineConfig, type ProxyOptions } from 'vite';
+import { defineConfig, loadEnv, type ProxyOptions } from 'vite';
 import { VitePWA } from 'vite-plugin-pwa';
 
-const DEFAULT_MEDIA_BUCKET_URL =
-  'https://game-clips-assets-306702688592-us-east-1-an.s3.us-east-1.amazonaws.com';
+const DEFAULT_MEDIA_CDN_URL = 'https://d3nyc65v53ljin.cloudfront.net';
 const DEV_MEDIA_PROXY_PREFIX = '/__s3';
 
-const mediaBucketProxy: Record<string, ProxyOptions> = {
-  [DEV_MEDIA_PROXY_PREFIX]: {
-    target: DEFAULT_MEDIA_BUCKET_URL,
-    changeOrigin: true,
-    rewrite: (requestPath) => requestPath.replace(new RegExp(`^${DEV_MEDIA_PROXY_PREFIX}`), '') || '/',
-  },
-};
+function mediaCdnProxy(origin: string): Record<string, ProxyOptions> {
+  return {
+    [DEV_MEDIA_PROXY_PREFIX]: {
+      target: origin,
+      changeOrigin: true,
+      rewrite: (requestPath) => requestPath.replace(new RegExp(`^${DEV_MEDIA_PROXY_PREFIX}`), '') || '/',
+    },
+  };
+}
 
-export default defineConfig(() => {
-  const base = process.env.VITE_BASE_PATH || '/';
+export default defineConfig(({ mode }) => {
+  const env = loadEnv(mode, process.cwd(), '');
+  const mediaOrigin = (env.VITE_MEDIA_BUCKET_URL || DEFAULT_MEDIA_CDN_URL).replace(/\/+$/, '');
+  const mediaBucketProxy = mediaCdnProxy(mediaOrigin);
+  const base = process.env.VITE_BASE_PATH || env.VITE_BASE_PATH || '/';
 
   return {
     base,

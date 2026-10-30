@@ -1,4 +1,4 @@
-import { getGameMetadataUrl } from '../config/mediaConfig';
+import { getGameMetadataUrl, videoUrlBesideThumb } from '../config/mediaConfig';
 import { Game, GameMedia } from '../types/game';
 import { allMediaFromMetadata, GameMetadata, parseGameMetadata } from '../utils/featuredMedia';
 import { orderedGamesForReel, pickReelMedia, ReelWatchOutcome } from '../utils/reelFeed';
@@ -34,6 +34,9 @@ async function fetchMetadata(game: Game, signal: AbortSignal): Promise<GameMetad
 }
 
 function resolveSource(media: GameMedia): string {
+  if (media.type === 'video') {
+    return videoUrlBesideThumb(media.url, media.thumbnailUrl, media.name);
+  }
   return media.url;
 }
 

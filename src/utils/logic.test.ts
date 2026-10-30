@@ -9,9 +9,8 @@ import {
   DEFAULT_MEDIA_WORKER_URL,
   GAME_BRANDING_ASSETS,
   buildMediaFileUrl,
-  gameImagesUrl,
   gameMetadataUrl,
-  gameVideosUrl,
+  getGameMetadataUrl,
   gamesCatalogUrl,
   matchBrandingAsset,
   resolveMediaBaseUrl,
@@ -31,7 +30,13 @@ import {
   resolveRouteCacheKey,
 } from '../libraryContext';
 import { allMediaFromMetadata } from './featuredMedia';
-import { classifyReelWatch, orderedGamesForReel, pickReelMedia } from './reelFeed';
+import {
+  classifyReelWatch,
+  orderedGamesForReel,
+  pickReelMedia,
+  reelFetchPriorityForAttach,
+  reelPreloadForAttach,
+} from './reelFeed';
 import { localAssetService } from '../services/driveAssetService';
 import { mapListedImagesToMedia, mapListedVideosToMedia } from '../services/driveService';
 import { formatMediaCapturedAt, parseMediaCapturedAt } from './mediaSort';
@@ -111,14 +116,20 @@ test('serializeGamesToMasterJson produces Flat File payload without media paths'
     JSON.stringify([
       {
         name: 'Cyberpunk 2077',
-        cover: `${DEFAULT_MEDIA_WORKER_URL}/Cyberpunk%202077/cover.jpg`,
+        cover: `${DEFAULT_MEDIA_BUCKET_URL}/Cyberpunk%202077/cover.jpg`,
+        banner: `${DEFAULT_MEDIA_BUCKET_URL}/Cyberpunk%202077/banner.jpg`,
+        icon: `${DEFAULT_MEDIA_BUCKET_URL}/Cyberpunk%202077/icon.png`,
       },
     ])
   );
   assert.equal(workerCatalog.length, 1);
   assert.equal(workerCatalog[0].name, 'Cyberpunk 2077');
-  assert.equal(workerCatalog[0].cover, `${DEFAULT_MEDIA_WORKER_URL}/Cyberpunk%202077/cover.jpg`);
+  assert.equal(workerCatalog[0].cover, `${DEFAULT_MEDIA_BUCKET_URL}/Cyberpunk%202077/cover.jpg`);
+  assert.equal(workerCatalog[0].banner, `${DEFAULT_MEDIA_BUCKET_URL}/Cyberpunk%202077/banner.jpg`);
+  assert.equal(workerCatalog[0].icon, `${DEFAULT_MEDIA_BUCKET_URL}/Cyberpunk%202077/icon.png`);
   assert.equal(localAssetService.getGameCover(workerCatalog[0]), workerCatalog[0].cover);
+  assert.equal(localAssetService.getGameBanner(workerCatalog[0]), workerCatalog[0].banner);
+  assert.equal(localAssetService.getGameIcon(workerCatalog[0]), workerCatalog[0].icon);
 });
 
 test('formatPlaytime formats durations correctly and verifies asset naming conventions', () => {
@@ -249,16 +260,16 @@ test('featured rotation rejects cover, banner, icon and logo assets', () => {
 });
 
 test('media cache accepts library images and videos only', () => {
-  assert.equal(isMediaAssetUrl(`${DEFAULT_MEDIA_WORKER_URL}/FIFA%2015/cover.jpg`), true);
-  assert.equal(isMediaAssetUrl(`${DEFAULT_MEDIA_WORKER_URL}/FIFA%2015/banner.jpg`), true);
-  assert.equal(isMediaAssetUrl(`${DEFAULT_MEDIA_WORKER_URL}/FIFA%2015/icon.png`), true);
-  assert.equal(isMediaAssetUrl(`${DEFAULT_MEDIA_WORKER_URL}/FIFA%2015/images/shot.png`), true);
-  assert.equal(isMediaAssetUrl(`${DEFAULT_MEDIA_WORKER_URL}/FIFA%2015/videos/clip.mp4`), true);
+  assert.equal(isMediaAssetUrl(`${DEFAULT_MEDIA_WORKER_URL}/FIFA%2015/cover.jpg`), false);
+  assert.equal(isMediaAssetUrl(`${DEFAULT_MEDIA_BUCKET_URL}/FIFA%2015/cover.jpg`), true);
+  assert.equal(isMediaAssetUrl(`${DEFAULT_MEDIA_BUCKET_URL}/FIFA%2015/banner.jpg`), true);
+  assert.equal(isMediaAssetUrl(`${DEFAULT_MEDIA_BUCKET_URL}/FIFA%2015/icon.png`), true);
+  assert.equal(isMediaAssetUrl(`${DEFAULT_MEDIA_BUCKET_URL}/FIFA%2015/images/shot.png`), true);
+  assert.equal(isMediaAssetUrl(`${DEFAULT_MEDIA_BUCKET_URL}/FIFA%2015/videos/clip.mp4`), true);
   assert.equal(
-    isMediaAssetUrl(`${DEFAULT_MEDIA_WORKER_URL}/FIFA%2015/videos/clip/thumb.jpg`),
+    isMediaAssetUrl(`${DEFAULT_MEDIA_BUCKET_URL}/FIFA%2015/videos/clip/thumb.jpg`),
     true,
   );
-  assert.equal(isMediaAssetUrl(`${DEFAULT_MEDIA_BUCKET_URL}/FIFA%2015/cover.jpg`), true);
   assert.equal(isMediaAssetUrl('http://localhost:3000/__s3/FIFA%2015/cover.jpg'), true);
   assert.equal(isMediaAssetUrl(DEFAULT_MEDIA_WORKER_URL), false);
   assert.equal(isMediaAssetUrl(`${DEFAULT_MEDIA_WORKER_URL}/FIFA%2015/meta`), false);
@@ -328,10 +339,6 @@ test('media URLs always point to the public bucket', () => {
     gamesCatalogUrl('https://game-clips-worker.example.workers.dev/'),
     'https://game-clips-worker.example.workers.dev'
   );
-  assert.equal(
-    gameImagesUrl(DEFAULT_MEDIA_WORKER_URL, 'Battlefield 6'),
-    `${DEFAULT_MEDIA_WORKER_URL}/Battlefield%206/images`
-  );
 
   const battlefield: Game = {
     id: 'game-battlefield-6',
@@ -393,10 +400,6 @@ test('media URLs always point to the public bucket', () => {
   assert.equal(images[0].url, `${DEFAULT_MEDIA_WORKER_URL}/Battlefield%206/images/shot.png`);
   assert.equal(images[0].thumbnailUrl, images[0].url);
 
-  assert.equal(
-    gameVideosUrl(DEFAULT_MEDIA_WORKER_URL, 'Battlefield 6'),
-    `${DEFAULT_MEDIA_WORKER_URL}/Battlefield%206/videos`
-  );
   const videos = mapListedVideosToMedia(battlefield, [
     {
       name: '2026-03-09T114754Z_Battlefield 6#1.mp4',
@@ -530,6 +533,14 @@ test('reel recommendations keep the same game after a complete watch and switch 
   });
   assert.equal(media.length, 3);
   assert.equal(pickReelMedia(media, [media[0].id, media[2].id], () => 0)?.id, media[1].id);
+  assert.equal(pickReelMedia(media, media.map((item) => item.id), () => 0), null);
+  assert.equal(reelPreloadForAttach('play'), 'auto');
+  assert.equal(reelPreloadForAttach('warm'), 'auto');
+  assert.equal(reelPreloadForAttach('metadata'), 'metadata');
+  assert.equal(reelPreloadForAttach('keep'), 'none');
+  assert.equal(reelFetchPriorityForAttach('play'), 'high');
+  assert.equal(reelFetchPriorityForAttach('warm'), 'low');
+  assert.equal(pickReelMedia([media[0]], [media[0].id], () => 0), null);
 
   const dated = allMediaFromMetadata(games[0], {
     images: ['https://cdn.example/A/images/2026-10-30T121500Z_A#1.jpg'],
@@ -663,6 +674,10 @@ test('featured media draws up to two images and two videos from metadata.json', 
 
   assert.equal(
     gameMetadataUrl(DEFAULT_MEDIA_BUCKET_URL, 'Battlefield 6'),
+    `${DEFAULT_MEDIA_BUCKET_URL}/Battlefield%206/metadata.json`,
+  );
+  assert.equal(
+    getGameMetadataUrl('Battlefield 6'),
     `${DEFAULT_MEDIA_BUCKET_URL}/Battlefield%206/metadata.json`,
   );
 });

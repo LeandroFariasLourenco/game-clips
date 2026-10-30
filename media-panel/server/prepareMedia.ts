@@ -1,4 +1,3 @@
-import { spawn } from "node:child_process";
 import { existsSync, statSync } from "node:fs";
 import { mkdir, readdir, readFile, rename, writeFile } from "node:fs/promises";
 import { basename, dirname, extname, join, parse, resolve } from "node:path";
@@ -11,6 +10,7 @@ import {
   serializeGameMetadata,
   type GameMetadata,
 } from "./gameMetadata.ts";
+import { prepareVideoFile } from "./prepareClip.ts";
 import {
   buildStandardizedMediaName,
   formatUtcStamp,
@@ -28,6 +28,7 @@ export interface PrepareReport {
   moved: number;
   renamed: number;
   thumbs: number;
+  faststart: number;
   metadata: number;
 }
 
@@ -191,90 +192,6 @@ async function applyTimestampNames(gameName: string, imagesDir: string, videosDi
   return renamed;
 }
 
-function run(command: string, args: string[]): Promise<{ code: number | null; stdout: string; stderr: string }> {
-  return new Promise((resolve, reject) => {
-    const child = spawn(command, args, { windowsHide: true });
-    let stdout = "";
-    let stderr = "";
-    child.stdout?.on("data", (chunk) => {
-      stdout += chunk.toString();
-    });
-    child.stderr?.on("data", (chunk) => {
-      stderr += chunk.toString();
-    });
-    child.on("error", reject);
-    child.on("close", (code) => resolve({ code, stdout, stderr }));
-  });
-}
-
-async function ensureFfmpeg() {
-  try {
-    const result = await run("ffmpeg", ["-version"]);
-    if (result.code !== 0) throw new Error("ffmpeg não respondeu.");
-  } catch (error) {
-    const missing = (error as NodeJS.ErrnoException).code === "ENOENT";
-    throw new Error(
-      missing
-        ? "ffmpeg não encontrado no PATH. Instale o ffmpeg para gerar as miniaturas."
-        : error instanceof Error
-          ? error.message
-          : String(error),
-    );
-  }
-}
-
-async function probeDurationSeconds(videoPath: string): Promise<number> {
-  const result = await run("ffprobe", [
-    "-v",
-    "error",
-    "-show_entries",
-    "format=duration",
-    "-of",
-    "default=noprint_wrappers=1:nokey=1",
-    videoPath,
-  ]);
-  const duration = Number.parseFloat(result.stdout.trim());
-  return Number.isFinite(duration) && duration > 0 ? duration : 0;
-}
-
-function seekTimeFor(duration: number): string {
-  if (duration <= 0) return "0";
-  const tenth = duration * 0.1;
-  return Math.min(Math.max(tenth, 0.1), Math.max(duration - 0.05, 0), 3).toFixed(3);
-}
-
-async function extractThumbnail(videoPath: string, outputPath: string) {
-  const seek = seekTimeFor(await probeDurationSeconds(videoPath));
-  const args = [
-    "-hide_banner",
-    "-loglevel",
-    "error",
-    "-y",
-    "-ss",
-    seek,
-    "-i",
-    videoPath,
-    "-frames:v",
-    "1",
-    "-vf",
-    "scale=1280:-2",
-    "-q:v",
-    "3",
-    outputPath,
-  ];
-
-  let result = await run("ffmpeg", args);
-  if (result.code === 0 && existsSync(outputPath)) return;
-
-  const fallback = args.slice();
-  fallback[5] = "0";
-  result = await run("ffmpeg", fallback);
-  if (result.code !== 0 || !existsSync(outputPath)) {
-    const details = (result.stderr || "ffmpeg falhou").trim();
-    throw new Error(details);
-  }
-}
-
 async function standardizeVideos(videosDir: string): Promise<{ moved: number; renamed: number }> {
   let moved = 0;
   let renamed = 0;
@@ -318,32 +235,25 @@ async function clipsIn(videosDir: string): Promise<VideoClip[]> {
   return clips;
 }
 
-async function generateMissingThumbs(
+async function prepareClips(
   gameName: string,
   videosDir: string,
   log?: (line: string) => void,
-): Promise<number> {
-  const pending: VideoClip[] = [];
-  for (const folder of await listDirs(videosDir)) {
-    const names = await listNames(join(videosDir, folder));
-    if (names.some((name) => name.toLowerCase() === THUMB_FILE)) continue;
-    const videos = names.filter(isMp4);
-    if (videos.length === 0) continue;
-    const canonical = `${folder}${VIDEO_EXTENSION}`;
-    const fileName = videos.includes(canonical) ? canonical : videos.sort((a, b) => a.localeCompare(b, "pt"))[0];
-    pending.push({ folder, fileName });
+): Promise<{ faststart: number; thumbs: number }> {
+  let faststart = 0;
+  let thumbs = 0;
+  for (const clip of await clipsIn(videosDir)) {
+    const result = prepareVideoFile(join(videosDir, clip.folder, clip.fileName));
+    if (result.faststart === "remuxed") {
+      faststart += 1;
+      logLine(log, `faststart: ${gameName}/videos/${clip.folder}/${clip.fileName}`);
+    }
+    if (result.thumb === "generated") {
+      thumbs += 1;
+      logLine(log, `thumb: ${gameName}/videos/${clip.folder}/${THUMB_FILE}`);
+    }
   }
-  if (pending.length === 0) return 0;
-
-  await ensureFfmpeg();
-  let generated = 0;
-  for (const clip of pending) {
-    const folderPath = join(videosDir, clip.folder);
-    await extractThumbnail(join(folderPath, clip.fileName), join(folderPath, THUMB_FILE));
-    generated += 1;
-    logLine(log, `thumb: ${gameName}/videos/${clip.folder}/${THUMB_FILE}`);
-  }
-  return generated;
+  return { faststart, thumbs };
 }
 
 export async function readGameMetadata(game: string, gameDir: string, publicBaseUrl: string): Promise<GameMetadata> {
@@ -363,33 +273,14 @@ async function writeMetadata(game: string, gameDir: string, publicBaseUrl: strin
   return true;
 }
 
-async function needsNewThumbnail(videosDir: string): Promise<boolean> {
-  if (!existsSync(videosDir)) return false;
-  if ((await listNames(videosDir)).some(isMp4)) return true;
-  for (const folder of await listDirs(videosDir)) {
-    const names = await listNames(join(videosDir, folder));
-    const hasVideo = names.some(isMp4);
-    const hasThumb = names.some((name) => name.toLowerCase() === THUMB_FILE);
-    if (hasVideo && !hasThumb) return true;
-  }
-  return false;
-}
-
 export async function prepareLocalMedia(options: {
   root: string;
   publicBaseUrl: string;
   log?: (line: string) => void;
 }): Promise<PrepareReport> {
-  const report: PrepareReport = { games: 0, moved: 0, renamed: 0, thumbs: 0, metadata: 0 };
+  const report: PrepareReport = { games: 0, moved: 0, renamed: 0, thumbs: 0, faststart: 0, metadata: 0 };
   const games = (await listDirs(options.root)).sort((a, b) => a.localeCompare(b, "pt", { sensitivity: "base" }));
   const failures: string[] = [];
-
-  for (const game of games) {
-    if (await needsNewThumbnail(join(options.root, game, "videos"))) {
-      await ensureFfmpeg();
-      break;
-    }
-  }
 
   for (const game of games) {
     report.games += 1;
@@ -412,8 +303,9 @@ export async function prepareLocalMedia(options: {
         if (standardized.renamed > 0) {
           logLine(options.log, `${game}: ${standardized.renamed} vídeo(s) renomeado(s) para <pasta>/<pasta>.mp4`);
         }
-        const thumbs = await generateMissingThumbs(game, videosDir, options.log);
-        report.thumbs += thumbs;
+        const prepared = await prepareClips(game, videosDir, options.log);
+        report.faststart += prepared.faststart;
+        report.thumbs += prepared.thumbs;
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);

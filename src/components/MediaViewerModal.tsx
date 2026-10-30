@@ -1,10 +1,12 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { motion } from 'motion/react';
+import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
 import { GameMedia } from '../types/game';
 import { videoUrlBesideThumb } from '../config/mediaConfig';
-import { overlayTransition } from '../motion';
+import { mediaSlideTransition, overlayTransition } from '../motion';
 import { formatMediaCapturedAt } from '../utils/mediaSort';
 import { releaseMediaElement } from '../utils/releaseMediaElement';
+import { useVideoLoadAppearance } from '../hooks/useVideoLoadAppearance';
+import { VideoBufferOverlay, VideoSkeletonOverlay } from './VideoLoadOverlays';
 import {
   X,
   Download,
@@ -28,6 +30,7 @@ interface MediaViewerModalProps {
 
 const MIN_ZOOM = 0.1;
 const MAX_ZOOM = 8;
+const FIT_SNAP_RATIO = 1.04;
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
@@ -64,18 +67,22 @@ function clampOffset(
   const width = naturalW * scale;
   const height = naturalH * scale;
   const nextX =
-    width <= viewW
-      ? mode === 'center'
-        ? (viewW - width) / 2
-        : clamp(x, 0, viewW - width)
+    width <= viewW || mode === 'center'
+      ? (viewW - width) / 2
       : clamp(x, viewW - width, 0);
   const nextY =
-    height <= viewH
-      ? mode === 'center'
-        ? (viewH - height) / 2
-        : clamp(y, 0, viewH - height)
+    height <= viewH || mode === 'center'
+      ? (viewH - height) / 2
       : clamp(y, viewH - height, 0);
   return { x: nextX, y: nextY };
+}
+
+function pointerDistance(a: { x: number; y: number }, b: { x: number; y: number }) {
+  return Math.hypot(b.x - a.x, b.y - a.y);
+}
+
+function pointerMidpoint(a: { x: number; y: number }, b: { x: number; y: number }) {
+  return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
 }
 
 let bodyScrollLocks = 0;
@@ -114,6 +121,27 @@ function unlockBodyScroll() {
 const SWIPE_MIN_DISTANCE = 64;
 const SWIPE_DOMINANCE = 1.35;
 
+const mediaSlideVariants = {
+  enter: (direction: number) => ({
+    x: `${direction * 100}%`,
+    opacity: 0,
+  }),
+  center: {
+    x: 0,
+    opacity: 1,
+  },
+  exit: (direction: number) => ({
+    x: `${direction * -100}%`,
+    opacity: 0,
+  }),
+};
+
+const mediaFadeVariants = {
+  enter: { opacity: 0 },
+  center: { opacity: 1 },
+  exit: { opacity: 0 },
+};
+
 export const MediaViewerModal: React.FC<MediaViewerModalProps> = ({
   media,
   items = [],
@@ -125,6 +153,14 @@ export const MediaViewerModal: React.FC<MediaViewerModalProps> = ({
   const hasPlaylist = Boolean(onSelect && total > 1 && index >= 0);
   const hasPrev = hasPlaylist && index > 0;
   const hasNext = hasPlaylist && index < total - 1;
+  const prefersReducedMotion = useReducedMotion();
+  const [slide, setSlide] = useState({ index, direction: 0 });
+  if (index !== slide.index) {
+    setSlide({
+      index,
+      direction: index > slide.index ? 1 : -1,
+    });
+  }
 
   const goBy = useCallback(
     (delta: number) => {
@@ -234,30 +270,43 @@ export const MediaViewerModal: React.FC<MediaViewerModalProps> = ({
         </button>
       ) : null}
 
-      {media.type === 'screenshot' || media.type === 'artwork' ? (
-        <ImageZoomViewer
-          key={media.url}
-          src={media.url}
-          capturedAt={formatMediaCapturedAt(media.name, media.createdTime)}
-          onSwipePrev={hasPrev ? goPrev : undefined}
-          onSwipeNext={hasNext ? goNext : undefined}
-        />
-      ) : media.type === 'video' ? (
-        <VideoPlayback
-          key={media.url}
-          src={videoUrlBesideThumb(media.url, media.thumbnailUrl, media.name)}
-          poster={media.thumbnailUrl}
-          capturedAt={formatMediaCapturedAt(media.name, media.createdTime)}
-          onSwipePrev={hasPrev ? goPrev : undefined}
-          onSwipeNext={hasNext ? goNext : undefined}
-        />
-      ) : (
-        <BackupFileView
-          media={media}
-          onSwipePrev={hasPrev ? goPrev : undefined}
-          onSwipeNext={hasNext ? goNext : undefined}
-        />
-      )}
+      <div className="absolute inset-0 overflow-hidden">
+        <AnimatePresence initial={false} custom={slide.direction}>
+          <motion.div
+            key={media.id}
+            className="absolute inset-0 will-change-transform"
+            custom={slide.direction}
+            variants={prefersReducedMotion ? mediaFadeVariants : mediaSlideVariants}
+            initial="enter"
+            animate="center"
+            exit="exit"
+            transition={mediaSlideTransition}
+          >
+            {media.type === 'screenshot' || media.type === 'artwork' ? (
+              <ImageZoomViewer
+                src={media.url}
+                capturedAt={formatMediaCapturedAt(media.name, media.createdTime)}
+                onSwipePrev={hasPrev ? goPrev : undefined}
+                onSwipeNext={hasNext ? goNext : undefined}
+              />
+            ) : media.type === 'video' ? (
+              <VideoPlayback
+                src={videoUrlBesideThumb(media.url, media.thumbnailUrl, media.name)}
+                poster={media.thumbnailUrl}
+                capturedAt={formatMediaCapturedAt(media.name, media.createdTime)}
+                onSwipePrev={hasPrev ? goPrev : undefined}
+                onSwipeNext={hasNext ? goNext : undefined}
+              />
+            ) : (
+              <BackupFileView
+                media={media}
+                onSwipePrev={hasPrev ? goPrev : undefined}
+                onSwipeNext={hasNext ? goNext : undefined}
+              />
+            )}
+          </motion.div>
+        </AnimatePresence>
+      </div>
     </motion.div>
   );
 };
@@ -361,7 +410,7 @@ function VideoPlayback({
   const playGenRef = useRef(0);
   const soundOnRef = useRef(false);
   const swipeRef = useRef<{ pointerId: number; x: number; y: number } | null>(null);
-  const [loading, setLoading] = useState(true);
+  const { initial, buffering, markFrame, markWaiting } = useVideoLoadAppearance(src);
   const [failed, setFailed] = useState(false);
   const canSwipe = Boolean(onSwipePrev || onSwipeNext);
 
@@ -388,14 +437,13 @@ function VideoPlayback({
       await video.play();
     } catch (error) {
       if (isAbortError(error) || generation !== playGenRef.current) return;
-      setLoading(false);
+      markFrame();
     }
-  }, []);
+  }, [markFrame]);
 
   useEffect(() => {
     playGenRef.current += 1;
     soundOnRef.current = false;
-    setLoading(true);
     setFailed(false);
     const video = videoRef.current;
     if (!video) return;
@@ -441,20 +489,10 @@ function VideoPlayback({
     >
       <div
         className="relative w-full max-w-5xl aspect-video rounded-xl overflow-hidden bg-black shadow-2xl"
-        aria-busy={loading}
+        aria-busy={initial || buffering}
       >
-        {loading && !failed && (
-          <div className="absolute inset-0 z-10 pointer-events-none" aria-hidden="true">
-            {poster ? (
-              <img
-                src={poster}
-                alt=""
-                className="absolute inset-0 w-full h-full object-cover opacity-35"
-              />
-            ) : null}
-            <div className="image-shimmer" />
-          </div>
-        )}
+        {initial && !failed ? <VideoSkeletonOverlay poster={poster} /> : null}
+        {buffering && !failed && !initial ? <VideoBufferOverlay /> : null}
         {failed && (
           <p className="pointer-events-none absolute inset-0 z-10 grid place-items-center px-6 text-center text-xs text-zinc-400">
             Não foi possível reproduzir o vídeo.
@@ -472,18 +510,23 @@ function VideoPlayback({
           preload="auto"
           onLoadStart={() => {
             setFailed(false);
-            setLoading(true);
           }}
-          onWaiting={() => setLoading(true)}
+          onWaiting={markWaiting}
+          onStalled={markWaiting}
+          onSeeking={markWaiting}
+          onLoadedData={markFrame}
           onPlaying={() => {
-            setLoading(false);
+            markFrame();
             setFailed(false);
           }}
+          onSeeked={markFrame}
           onVolumeChange={(event) => {
             soundOnRef.current = !event.currentTarget.muted;
           }}
           onCanPlay={(event) => {
-            setLoading(false);
+            if (event.currentTarget.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
+              markFrame();
+            }
             void tryPlay(event.currentTarget);
           }}
           onError={() => {
@@ -491,7 +534,7 @@ function VideoPlayback({
             if (mediaError && mediaError.code !== mediaError.MEDIA_ERR_ABORTED) {
               setFailed(true);
             }
-            setLoading(false);
+            markFrame();
           }}
           className="w-full h-full object-contain bg-black"
         >
@@ -515,6 +558,7 @@ function ImageZoomViewer({
   onSwipeNext?: () => void;
 }) {
   const viewportRef = useRef<HTMLDivElement>(null);
+  const pointersRef = useRef(new Map<number, { x: number; y: number }>());
   const dragRef = useRef<{
     pointerId: number;
     startX: number;
@@ -522,7 +566,13 @@ function ImageZoomViewer({
     originX: number;
     originY: number;
   } | null>(null);
-  const pinchRef = useRef<{ distance: number; scale: number } | null>(null);
+  const pinchRef = useRef<{
+    distance: number;
+    scale: number;
+    imageX: number;
+    imageY: number;
+  } | null>(null);
+  const pinchedRef = useRef(false);
 
   const [natural, setNatural] = useState({ w: 0, h: 0 });
   const [scale, setScale] = useState(1);
@@ -668,6 +718,29 @@ function ImageZoomViewer({
     return () => observer.disconnect();
   }, [natural.h, natural.w]);
 
+  const settleTransform = useCallback(() => {
+    const viewport = viewportRef.current;
+    if (!viewport || natural.w <= 0) return;
+    const rect = viewport.getBoundingClientRect();
+    const fit = fitScale(rect.width, rect.height, natural.w, natural.h);
+    if (scaleRef.current <= fit * FIT_SNAP_RATIO) {
+      setFit();
+      return;
+    }
+    const nextOffset = clampOffset(
+      offsetRef.current.x,
+      offsetRef.current.y,
+      rect.width,
+      rect.height,
+      natural.w,
+      natural.h,
+      scaleRef.current,
+      'pan',
+    );
+    offsetRef.current = nextOffset;
+    setOffset(nextOffset);
+  }, [natural.h, natural.w, setFit]);
+
   const applyImageSize = useCallback((image: HTMLImageElement) => {
     const width = image.naturalWidth;
     const height = image.naturalHeight;
@@ -690,10 +763,73 @@ function ImageZoomViewer({
     setOffset(nextOffset);
   }, []);
 
+  function beginPinch() {
+    const viewport = viewportRef.current;
+    const points = [...pointersRef.current.values()];
+    if (!viewport || points.length < 2) return;
+    const [first, second] = points;
+    const rect = viewport.getBoundingClientRect();
+    const mid = pointerMidpoint(first, second);
+    const viewX = mid.x - rect.left;
+    const viewY = mid.y - rect.top;
+    const currentScale = scaleRef.current;
+    pinchRef.current = {
+      distance: Math.max(pointerDistance(first, second), 1),
+      scale: currentScale,
+      imageX: (viewX - offsetRef.current.x) / currentScale,
+      imageY: (viewY - offsetRef.current.y) / currentScale,
+    };
+    pinchedRef.current = true;
+    dragRef.current = null;
+    viewModeRef.current = 'free';
+    setPanning(false);
+  }
+
+  function updatePinch() {
+    const viewport = viewportRef.current;
+    const pinch = pinchRef.current;
+    const points = [...pointersRef.current.values()];
+    if (!viewport || !pinch || points.length < 2) return;
+    const [first, second] = points;
+    const rect = viewport.getBoundingClientRect();
+    const mid = pointerMidpoint(first, second);
+    const distance = Math.max(pointerDistance(first, second), 1);
+    const nextScale = clamp(pinch.scale * (distance / pinch.distance), MIN_ZOOM, MAX_ZOOM);
+    const nextOffset = {
+      x: mid.x - rect.left - pinch.imageX * nextScale,
+      y: mid.y - rect.top - pinch.imageY * nextScale,
+    };
+    scaleRef.current = nextScale;
+    offsetRef.current = nextOffset;
+    setScale(nextScale);
+    setOffset(nextOffset);
+  }
+
+  function rebasePanFromRemainingPointer() {
+    const remaining = pointersRef.current.entries().next().value;
+    if (!remaining) {
+      dragRef.current = null;
+      return;
+    }
+    const [pointerId, point] = remaining;
+    dragRef.current = {
+      pointerId,
+      startX: point.x,
+      startY: point.y,
+      originX: offsetRef.current.x,
+      originY: offsetRef.current.y,
+    };
+  }
+
   function onPointerDown(event: React.PointerEvent<HTMLDivElement>) {
-    if (pinchRef.current) return;
     if (event.button !== 0) return;
     event.currentTarget.setPointerCapture(event.pointerId);
+    pointersRef.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    if (pointersRef.current.size >= 2) {
+      beginPinch();
+      return;
+    }
+    pinchedRef.current = false;
     dragRef.current = {
       pointerId: event.pointerId,
       startX: event.clientX,
@@ -705,8 +841,14 @@ function ImageZoomViewer({
   }
 
   function onPointerMove(event: React.PointerEvent<HTMLDivElement>) {
+    if (!pointersRef.current.has(event.pointerId)) return;
+    pointersRef.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    if (pinchRef.current && pointersRef.current.size >= 2) {
+      updatePinch();
+      return;
+    }
     const drag = dragRef.current;
-    if (!drag || drag.pointerId !== event.pointerId || pinchRef.current) return;
+    if (!drag || drag.pointerId !== event.pointerId) return;
     const viewport = viewportRef.current;
     if (!viewport) return;
     const rect = viewport.getBoundingClientRect();
@@ -725,16 +867,41 @@ function ImageZoomViewer({
   }
 
   function endPan(event: React.PointerEvent<HTMLDivElement>) {
+    const tracked = pointersRef.current.has(event.pointerId);
     const drag = dragRef.current;
-    if (!drag || drag.pointerId !== event.pointerId) return;
-    const dx = event.clientX - drag.startX;
-    const dy = event.clientY - drag.startY;
-    dragRef.current = null;
-    setPanning(false);
+    const dx = drag && drag.pointerId === event.pointerId ? event.clientX - drag.startX : 0;
+    const dy = drag && drag.pointerId === event.pointerId ? event.clientY - drag.startY : 0;
+    pointersRef.current.delete(event.pointerId);
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId);
     }
-    if (pinchRef.current) return;
+
+    if (pinchRef.current) {
+      if (pointersRef.current.size >= 2) {
+        beginPinch();
+        return;
+      }
+      pinchRef.current = null;
+      if (pointersRef.current.size === 1) {
+        rebasePanFromRemainingPointer();
+        return;
+      }
+      dragRef.current = null;
+      setPanning(false);
+      lastTapRef.current = null;
+      settleTransform();
+      return;
+    }
+
+    if (!tracked || !drag || drag.pointerId !== event.pointerId) return;
+    dragRef.current = null;
+    setPanning(false);
+
+    if (pinchedRef.current) {
+      pinchedRef.current = false;
+      settleTransform();
+      return;
+    }
 
     const moved = Math.hypot(dx, dy);
     if (moved < 12) {
@@ -760,27 +927,6 @@ function ImageZoomViewer({
     setFit();
   }
 
-  function onTouchStart(event: React.TouchEvent<HTMLDivElement>) {
-    if (event.touches.length !== 2) {
-      pinchRef.current = null;
-      return;
-    }
-    const [first, second] = [event.touches[0], event.touches[1]];
-    pinchRef.current = {
-      distance: Math.hypot(second.clientX - first.clientX, second.clientY - first.clientY),
-      scale: scaleRef.current,
-    };
-  }
-
-  function onTouchMove(event: React.TouchEvent<HTMLDivElement>) {
-    if (event.touches.length !== 2 || !pinchRef.current) return;
-    event.preventDefault();
-    const [first, second] = [event.touches[0], event.touches[1]];
-    const distance = Math.hypot(second.clientX - first.clientX, second.clientY - first.clientY);
-    const nextScale = pinchRef.current.scale * (distance / pinchRef.current.distance);
-    applyZoom(nextScale, (first.clientX + second.clientX) / 2, (first.clientY + second.clientY) / 2);
-  }
-
   const percent = Math.round(scale * 100);
   const atActual = Math.abs(scale - 1) < 0.02;
   const viewportRect = viewportRef.current?.getBoundingClientRect();
@@ -800,11 +946,6 @@ function ImageZoomViewer({
         onPointerUp={endPan}
         onPointerCancel={endPan}
         onDoubleClick={onDoubleClick}
-        onTouchStart={onTouchStart}
-        onTouchMove={onTouchMove}
-        onTouchEnd={() => {
-          pinchRef.current = null;
-        }}
       >
         {!loaded && (
           <div className="absolute inset-0 grid place-items-center text-zinc-500 text-xs">

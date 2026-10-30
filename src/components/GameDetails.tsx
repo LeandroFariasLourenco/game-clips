@@ -111,19 +111,7 @@ export const GameDetails: React.FC<GameDetailsProps> = ({ game }) => {
     const loadMedia = async () => {
       setLoading(true);
       try {
-        const [imagesResult, videosResult] = await Promise.allSettled([
-          localLibraryService.listGameImages(game),
-          localLibraryService.listGameVideos(game),
-        ]);
-        if (imagesResult.status === 'rejected') {
-          console.error('Falha ao listar imagens do jogo:', imagesResult.reason);
-        }
-        if (videosResult.status === 'rejected') {
-          console.error('Falha ao listar vídeos do jogo:', videosResult.reason);
-        }
-        const images = imagesResult.status === 'fulfilled' ? imagesResult.value : [];
-        const videos = videosResult.status === 'fulfilled' ? videosResult.value : [];
-        const listed = [...images, ...videos];
+        const listed = await localLibraryService.listGameMedia(game);
         if (!cancelled) {
           setMediaList(listed);
           void warmMediaCache(collectGameMediaCacheUrls(listed));

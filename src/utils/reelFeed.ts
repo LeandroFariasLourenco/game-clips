@@ -6,6 +6,20 @@ export const REEL_SWIPE_PX = 72;
 export const REEL_TAP_PX = 12;
 export const REEL_SNAP_MS = 380;
 
+export type ReelAttachMode = 'play' | 'warm' | 'metadata' | 'keep';
+
+export function reelPreloadForAttach(attach: ReelAttachMode): 'auto' | 'metadata' | 'none' {
+  if (attach === 'play' || attach === 'warm') return 'auto';
+  if (attach === 'metadata') return 'metadata';
+  return 'none';
+}
+
+export function reelFetchPriorityForAttach(attach: ReelAttachMode): 'high' | 'low' | 'auto' {
+  if (attach === 'play') return 'high';
+  if (attach === 'warm') return 'low';
+  return 'auto';
+}
+
 export type ReelWatchOutcome = 'init' | 'completed' | 'skipped';
 
 export function classifyReelWatch(completed: boolean): Exclude<ReelWatchOutcome, 'init'> {
@@ -60,6 +74,6 @@ export function pickReelMedia(
   if (media.length === 0) return null;
   const excluded = new Set(excludeIds);
   const unused = media.filter((item) => !excluded.has(item.id));
-  const pool = unused.length > 0 ? unused : media;
-  return pool[Math.floor(random() * pool.length)] ?? null;
+  if (unused.length === 0) return null;
+  return unused[Math.floor(random() * unused.length)] ?? null;
 }

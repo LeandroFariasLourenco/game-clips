@@ -33,7 +33,7 @@ O painel **lista jogos pelas pastas da raiz** (`ListObjectsV2` com `Delimiter=/`
   videos/<clip>/thumb.jpg
 ```
 
-URL pública padrão: `AWS_S3_PUBLIC_BASE_URL` no `.env` (mesmo bucket da biblioteca).
+URL pública (CloudFront) no `.env`: `AWS_S3_PUBLIC_BASE_URL` ou `VITE_MEDIA_BUCKET_URL`. Essa base entra nas URLs do `metadata.json`.
 
 Nomes de pasta: sem `\ / : * ? " < > |`. Criar jogo gera `images/` e `videos/` vazios e um `metadata.json` vazio. Remover jogo só é permitido sem screenshots nem clips; `metadata.json` e branding canônico não bloqueiam a exclusão.
 
@@ -68,7 +68,7 @@ Alterar data de screenshot/clip: botão direito → **Alterar data**. Atualiza s
 
 A listagem de imagens e vídeos mostra a inserção a partir do `LastModified` do objeto no S3. A data original do arquivo fica no nome (`YYYY-MM-DDTHHmmssZ_Jogo#n`, UTC a partir da coluna Data do Explorer).
 
-Upload de screenshot/clip (botão ou arraste, um ou vários arquivos): o painel mostra o nome final `YYYY-MM-DDTHHmmssZ_Jogo#n.ext` (UTC + sequência) e só envia depois da confirmação. Capa, banner e ícone não usam esse padrão.
+Upload de screenshot/clip (botão ou arraste, um ou vários arquivos): o painel mostra o nome final `YYYY-MM-DDTHHmmssZ_Jogo#n.ext` (UTC + sequência) e só envia depois da confirmação. Cada clip é preparado com `scripts/lib/prepare-clip.cjs` (faststart + `thumb.jpg`) e os dois arquivos sobem ao S3. Capa, banner e ícone não usam esse padrão.
 
 ## Dois runtimes
 
@@ -78,13 +78,13 @@ Upload de screenshot/clip (botão ou arraste, um ou vários arquivos): o painel 
 | Cache disco | `cache.ts` → `media-panel/.cache/` | `cache.rs` |
 | SteamGridDB | `steamgrid.ts` | não (sempre HTTP `/api/steamgrid…` no Vite) |
 | Pasta local + `aws s3 sync` | `localMedia.ts` + `prepareMedia.ts` | não |
-| Miniaturas de vídeo (ffmpeg) | `prepareMedia.ts` | não |
+| Miniaturas e faststart (ffmpeg) | `prepareClip.ts` → `scripts/lib/prepare-clip.cjs` | `node scripts/prepare-clip-file.cjs` no upload de vídeo |
 
 No navegador, capas passam por `/api/asset?key=…` (cache local). No Tauri, as URLs públicas do bucket são usadas direto.
 
 ## Pasta local
 
-`server/localMedia.ts` aponta para `../media` (raiz do repo, no `.gitignore` da biblioteca). O sync: (1) padroniza nomes `YYYY-MM-DDTHHmmssZ_Jogo#n.ext` (UTC + sequência) em `images/` e clips, move clips para subpastas, gera `thumb.jpg` com ffmpeg, grava `metadata.json`; (2) `aws s3 sync` da pasta inteira. Exige AWS CLI e ffmpeg no PATH.
+`server/localMedia.ts` aponta para `../media` (raiz do repo, no `.gitignore` da biblioteca). O sync: (1) padroniza nomes `YYYY-MM-DDTHHmmssZ_Jogo#n.ext` (UTC + sequência) em `images/` e clips, move clips para subpastas, remuxa MP4 com `+faststart` se o `moov` estiver no fim, gera `thumb.jpg` com ffmpeg, grava `metadata.json`; (2) `aws s3 sync` da pasta inteira. Exige AWS CLI e ffmpeg no PATH.
 
 ## Frontend
 

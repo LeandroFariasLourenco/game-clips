@@ -5,6 +5,7 @@ import { extname, join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { clearImageCache, CACHE_ROOT } from "./cache.ts";
 import { METADATA_FILE, prepareLocalMedia } from "./prepareMedia.ts";
+import { resolvePublicAssetBaseUrl } from "./gameMetadata.ts";
 import { getS3, HttpError, loadEnv } from "./s3.ts";
 
 const PANEL_ROOT = join(fileURLToPath(new URL(".", import.meta.url)), "..");
@@ -156,13 +157,7 @@ export function readLocalDestination(): { destination: LocalMediaDestination | n
 
 export function resolvePublicBaseUrl(): string {
   loadEnv();
-  const explicit = process.env.AWS_S3_PUBLIC_BASE_URL?.trim().replace(/\/+$/, "");
-  if (explicit) return explicit;
-  const { destination, error } = readLocalDestination();
-  if (!destination) {
-    throw new HttpError(error || "Destino do bucket indisponível.", 400);
-  }
-  return `https://${destination.bucket}.s3.${destination.region}.amazonaws.com`;
+  return resolvePublicAssetBaseUrl(process.env.AWS_S3_PUBLIC_BASE_URL, process.env.VITE_MEDIA_BUCKET_URL);
 }
 
 async function collectFiles(dir: string, files: string[]) {
@@ -407,7 +402,7 @@ export function beginLocalSync(): LocalSyncStatus {
   state.log = [];
   state.pending = "";
   state.command = `aws ${args.join(" ")}`;
-  pushLog(state, "1/2 Padronizando vídeos, gerando miniaturas e gravando metadata.json");
+  pushLog(state, "1/2 Padronizando vídeos, aplicando faststart, gerando miniaturas e gravando metadata.json");
 
   void (async () => {
     try {
@@ -418,7 +413,7 @@ export function beginLocalSync(): LocalSyncStatus {
       });
       pushLog(
         state,
-        `Preparação: ${report.moved} movido(s), ${report.renamed} renomeado(s), ${report.thumbs} thumb(s), ${report.metadata} metadata.json`,
+        `Preparação: ${report.moved} movido(s), ${report.renamed} renomeado(s), ${report.faststart} faststart, ${report.thumbs} thumb(s), ${report.metadata} metadata.json`,
       );
       if (state.status !== "running") return;
       pushLog(state, "2/2 Enviando a pasta para o S3");

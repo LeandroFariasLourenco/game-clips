@@ -13,6 +13,8 @@ const stats = emptyStats();
 runThumbs(options, stats);
 printSummary(stats, options, [
   `Pastas de vídeo:       ${stats.videos}`,
+  `Já com moov no início: ${stats.alreadyFaststart}`,
+  `Remux faststart:       ${stats.faststart}`,
   `Thumbs já existentes:  ${stats.existing}`,
   `Thumbs geradas:        ${stats.generated}`,
 ]);

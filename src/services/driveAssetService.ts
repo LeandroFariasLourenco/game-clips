@@ -16,10 +16,13 @@ class RemoteAssetService {
   }
 
   public getGameBanner(game: Game): string {
+    if (game.banner) return game.banner;
+    if (game.customBannerUrl) return game.customBannerUrl;
     return this.getGameAsset(game, 'banner');
   }
 
   public getGameIcon(game: Game): string {
+    if (game.icon) return game.icon;
     return this.getGameAsset(game, 'icon');
   }
 }

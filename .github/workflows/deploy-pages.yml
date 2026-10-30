@@ -27,6 +27,7 @@ jobs:
       - run: npm run build
         env:
           VITE_BASE_PATH: /game-clips/
+          VITE_MEDIA_BUCKET_URL: https://d3nyc65v53ljin.cloudfront.net
       - name: SPA fallback
         run: cp dist/index.html dist/404.html
       - uses: actions/configure-pages@v5

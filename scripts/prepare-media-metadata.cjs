@@ -10,8 +10,7 @@ const {
 } = require('./lib/prepare-media.cjs');
 
 const PROJECT_ROOT = path.join(__dirname, '..');
-const DEFAULT_PUBLIC_BASE_URL =
-  'https://game-clips-assets-306702688592-us-east-1-an.s3.us-east-1.amazonaws.com';
+const DEFAULT_PUBLIC_BASE_URL = 'https://d3nyc65v53ljin.cloudfront.net';
 
 dotenv.config({ path: path.join(PROJECT_ROOT, '.env'), quiet: true });
 dotenv.config({ path: path.join(PROJECT_ROOT, '.env.local'), override: true, quiet: true });

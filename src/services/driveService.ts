@@ -3,13 +3,13 @@ import { parseMasterJsonToGames } from '../utils/storageFormat';
 import {
   GAMES_MANIFEST_FILE,
   buildMediaFileUrl,
-  getGameImagesUrl,
-  getGameVideosUrl,
+  getGameMetadataUrl,
   getGamesManifestUrl,
   getMediaBaseUrl,
   getMediaLibraryLabel,
   videoUrlBesideThumb,
 } from '../config/mediaConfig';
+import { allMediaFromMetadata, parseGameMetadata } from '../utils/featuredMedia';
 import { clearGamesCache, readCachedText, storeCachedResponse } from './gamesCache';
 import { clearMediaCache } from './mediaCache';
 import { FEATURED_STORAGE_KEY } from '../utils/featuredRotation';
@@ -76,7 +76,8 @@ export function mapListedVideosToMedia(game: Game, files: WorkerListedFile[]): G
 
 class RemoteLibraryService {
   /**
-   * Loads the game catalog from the Cloudflare Worker (`GET /` → `{ name, cover }[]`).
+   * Loads the game catalog from the Cloudflare Worker
+   * (`GET /` → `{ name, cover, banner, icon }[]` with CloudFront URLs).
    * Cached indefinitely until the user explicitly reloads the library.
    */
   public async loadLocalGames(options?: {
@@ -120,26 +121,17 @@ class RemoteLibraryService {
     }
   }
 
-  public async listGameImages(game: Game): Promise<GameMedia[]> {
+  public async listGameMedia(game: Game): Promise<GameMedia[]> {
     const folderName = getGameFolderName(game);
-    const res = await fetch(getGameImagesUrl(folderName), { cache: 'no-store' });
+    const res = await fetch(getGameMetadataUrl(folderName), { cache: 'no-store' });
+    if (res.status === 404) return [];
     if (!res.ok) {
-      throw new Error(`Falha ao listar imagens (${res.status})`);
+      throw new Error(`Falha ao ler metadata.json (${res.status})`);
     }
 
-    const payload = (await res.json()) as { images?: WorkerListedFile[] };
-    return mapListedImagesToMedia(game, payload.images || []);
-  }
-
-  public async listGameVideos(game: Game): Promise<GameMedia[]> {
-    const folderName = getGameFolderName(game);
-    const res = await fetch(getGameVideosUrl(folderName), { cache: 'no-store' });
-    if (!res.ok) {
-      throw new Error(`Falha ao listar vídeos (${res.status})`);
-    }
-
-    const payload = (await res.json()) as { videos?: WorkerListedFile[] };
-    return mapListedVideosToMedia(game, payload.videos || []);
+    const parsed = parseGameMetadata(await res.text());
+    if (!parsed) return [];
+    return sortMediaNewestFirst(allMediaFromMetadata(game, parsed));
   }
 }
 

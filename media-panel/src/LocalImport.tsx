@@ -70,7 +70,7 @@ export function LocalImport({ onImported }: { onImported?: () => void }) {
       [
         `Preparar a pasta local e enviar tudo para ${inventory.destination.uri}?`,
         "",
-        "Antes do envio, o painel organiza os vídeos em videos/<nome>/<nome>.mp4, gera thumb.jpg e grava metadata.json na raiz de cada jogo.",
+        "Antes do envio, o painel organiza os vídeos em videos/<nome>/<nome>.mp4, move o índice moov para o início (faststart), gera thumb.jpg e grava metadata.json na raiz de cada jogo.",
         "Depois executa aws s3 sync da pasta inteira. Arquivos iguais são ignorados. Nada é apagado no bucket.",
         "",
         "Confirme só se media/ já tiver a biblioteca completa.",
@@ -102,7 +102,7 @@ export function LocalImport({ onImported }: { onImported?: () => void }) {
           <h2>Importar biblioteca local</h2>
           <p className="muted">
             Resumo do que está no disco. Esta leitura não altera arquivos. O deploy, depois da
-            confirmação, padroniza os vídeos, gera as miniaturas, grava metadata.json e só então
+            confirmação, padroniza os vídeos, aplica faststart, gera as miniaturas, grava metadata.json e só então
             sincroniza a pasta inteira.
           </p>
         </div>
@@ -220,8 +220,8 @@ export function LocalImport({ onImported }: { onImported?: () => void }) {
               <div>
                 <h3>Deploy para o S3</h3>
                 <p className="muted">
-                  Organiza cada vídeo em videos/&lt;nome&gt;/&lt;nome&gt;.mp4, gera thumb.jpg,
-                  grava metadata.json ao lado da capa e envia a pasta inteira. O JSON lista images
+                  Organiza cada vídeo em videos/&lt;nome&gt;/&lt;nome&gt;.mp4, aplica faststart,
+                  gera thumb.jpg, grava metadata.json ao lado da capa e envia a pasta inteira. O JSON lista images
                   com a URL de cada screenshot e videos com a URL do mp4 e a URL da thumb. Objetos
                   iguais no bucket são ignorados. Arquivos que existem só no bucket permanecem lá.
                 </p>

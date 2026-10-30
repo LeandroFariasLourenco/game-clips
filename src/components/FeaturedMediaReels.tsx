@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import { Autoplay, Navigation } from 'swiper/modules';
 import { Swiper, SwiperSlide } from 'swiper/react';
@@ -16,6 +16,11 @@ import 'swiper/css/navigation';
 
 interface FeaturedMediaReelsProps {
   items: FeaturedHighlight[];
+}
+
+function isFirefoxAndroid() {
+  if (typeof navigator === 'undefined') return false;
+  return /Firefox/i.test(navigator.userAgent) && /Android/i.test(navigator.userAgent);
 }
 
 function isActiveReelVideo(video: HTMLVideoElement) {
@@ -55,10 +60,11 @@ function syncActiveReelMedia(swiper: SwiperInstance) {
 
 export const FeaturedMediaReels: React.FC<FeaturedMediaReelsProps> = ({ items }) => {
   const [selected, setSelected] = useState<GameMedia | null>(null);
+  const geckoAndroid = useMemo(() => isFirefoxAndroid(), []);
 
   if (items.length === 0) return null;
 
-  const canLoop = items.length > 2;
+  const canLoop = items.length > 4 && !geckoAndroid;
 
   return (
     <motion.section
@@ -78,11 +84,13 @@ export const FeaturedMediaReels: React.FC<FeaturedMediaReelsProps> = ({ items })
         modules={[Autoplay, Navigation]}
         slidesPerView={2.15}
         spaceBetween={10}
-        centeredSlides
-        centerInsufficientSlides
+        centeredSlides={!geckoAndroid}
+        centerInsufficientSlides={!geckoAndroid}
+        cssMode={geckoAndroid}
         observer
         observeParents
-        watchOverflow
+        observeSlideChildren
+        watchOverflow={false}
         loop={canLoop}
         autoplay={
           items.length > 1
@@ -95,22 +103,31 @@ export const FeaturedMediaReels: React.FC<FeaturedMediaReelsProps> = ({ items })
             slidesPerView: 2.65,
             spaceBetween: 14,
             centeredSlides: false,
+            cssMode: false,
             navigation: { enabled: true },
           },
           1024: {
             slidesPerView: 3.4,
             spaceBetween: 16,
             centeredSlides: false,
+            cssMode: false,
             navigation: { enabled: true },
           },
           1280: {
             slidesPerView: 4.2,
             spaceBetween: 16,
             centeredSlides: false,
+            cssMode: false,
             navigation: { enabled: true },
           },
         }}
-        onSwiper={syncActiveReelMedia}
+        onSwiper={(swiper) => {
+          syncActiveReelMedia(swiper);
+          requestAnimationFrame(() => {
+            swiper.update();
+            syncActiveReelMedia(swiper);
+          });
+        }}
         onSlideChange={syncActiveReelMedia}
         onSlideChangeTransitionEnd={syncActiveReelMedia}
         a11y={{
@@ -122,7 +139,9 @@ export const FeaturedMediaReels: React.FC<FeaturedMediaReelsProps> = ({ items })
         {items.map((item) => (
           <SwiperSlide key={item.media.id}>
             {({ isActive }) => (
-              <ReelCard item={item} active={isActive} onOpen={() => setSelected(item.media)} />
+              <div className="reel-card">
+                <ReelCard item={item} active={isActive} onOpen={() => setSelected(item.media)} />
+              </div>
             )}
           </SwiperSlide>
         ))}
@@ -145,21 +164,20 @@ export const FeaturedMediaReels: React.FC<FeaturedMediaReelsProps> = ({ items })
 function FeaturedReelVideo({ src, poster }: { src: string; poster?: string }) {
   const videoRef = useRef<HTMLVideoElement>(null);
 
-  const setVideoNode = (node: HTMLVideoElement | null) => {
-    if (videoRef.current && videoRef.current !== node) {
-      releaseMediaElement(videoRef.current);
-    }
-    videoRef.current = node;
-  };
-
   useEffect(() => {
     const video = videoRef.current;
     if (video) playReelVideo(video);
   }, [src]);
 
+  useEffect(() => {
+    return () => {
+      releaseMediaElement(videoRef.current);
+    };
+  }, []);
+
   return (
     <video
-      ref={setVideoNode}
+      ref={videoRef}
       src={src}
       poster={poster}
       muted
@@ -186,7 +204,7 @@ const ReelCard: React.FC<{
     <button
       type="button"
       onClick={onOpen}
-      className="group relative block w-full aspect-[9/16] overflow-hidden rounded-2xl border border-zinc-800/80 bg-zinc-950 text-left cursor-pointer transition duration-300 hover:border-purple-500/70 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-purple-500"
+      className="group relative block overflow-hidden rounded-2xl border border-zinc-800/80 bg-zinc-950 text-left cursor-pointer transition duration-300 hover:border-purple-500/70 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-purple-500"
       aria-label={isVideo ? `Reproduzir vídeo de ${item.gameName}` : `Abrir imagem de ${item.gameName}`}
     >
       {preview ? (

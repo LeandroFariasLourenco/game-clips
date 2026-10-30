@@ -1,5 +1,7 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
+use std::process::Command;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use aws_sdk_s3::config::{BehaviorVersion, Credentials, Region};
 use aws_sdk_s3::primitives::ByteStream;
@@ -14,6 +16,7 @@ const BANNER_FILE: &str = "banner.jpg";
 const ICON_FILE: &str = "icon.png";
 const METADATA_FILE: &str = "metadata.json";
 const VIDEO_THUMB_FILE: &str = "thumb.jpg";
+const DEFAULT_PUBLIC_ASSET_BASE_URL: &str = "https://d3nyc65v53ljin.cloudfront.net";
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -120,11 +123,14 @@ pub struct GameMetadata {
 }
 
 fn required_env(name: &str) -> Result<String, Error> {
+    optional_env(name).ok_or_else(|| Error::Message(format!("Defina {name} no arquivo .env do painel.")))
+}
+
+fn optional_env(name: &str) -> Option<String> {
     std::env::var(name)
-        .map(|value| value.trim().to_string())
         .ok()
+        .map(|value| value.trim().trim_matches('"').trim_end_matches('/').to_string())
         .filter(|value| !value.is_empty())
-        .ok_or_else(|| Error::Message(format!("Defina {name} no arquivo .env do painel.")))
 }
 
 fn normalize_bucket(raw: &str) -> String {
@@ -415,6 +421,81 @@ fn extension(path: &Path) -> String {
         .to_ascii_lowercase()
 }
 
+struct TempDir(PathBuf);
+
+impl Drop for TempDir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+fn prepare_clip_script() -> Result<PathBuf, Error> {
+    let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let exe_dir = std::env::current_exe()
+        .ok()
+        .and_then(|path| path.parent().map(Path::to_path_buf));
+    let candidates = [
+        manifest.join("../../scripts/prepare-clip-file.cjs"),
+        cwd.join("scripts/prepare-clip-file.cjs"),
+        cwd.join("../scripts/prepare-clip-file.cjs"),
+        exe_dir
+            .as_ref()
+            .map(|dir| dir.join("../scripts/prepare-clip-file.cjs"))
+            .unwrap_or_default(),
+    ];
+    for path in candidates {
+        if path.is_file() {
+            return path
+                .canonicalize()
+                .map_err(|error| Error::Message(format!("Não foi possível resolver {path:?}: {error}")));
+        }
+    }
+    Err(Error::Message(
+        "scripts/prepare-clip-file.cjs não encontrado. Rode o painel a partir do repositório, com Node e ffmpeg no PATH.".into(),
+    ))
+}
+
+fn prepare_uploaded_clip(source: &Path, stem: &str) -> Result<(PathBuf, PathBuf, TempDir), Error> {
+    let stamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|value| value.as_nanos())
+        .unwrap_or(0);
+    let root = std::env::temp_dir().join(format!("game-clips-upload-{stamp}"));
+    let folder = root.join(stem);
+    std::fs::create_dir_all(&folder)
+        .map_err(|error| Error::Message(format!("Não foi possível criar pasta temporária: {error}")))?;
+    let dest = folder.join(format!("{stem}.mp4"));
+    std::fs::copy(source, &dest)
+        .map_err(|error| Error::Message(format!("Não foi possível copiar o clip para preparar: {error}")))?;
+
+    let output = Command::new("node")
+        .arg(prepare_clip_script()?)
+        .arg("--file")
+        .arg(&dest)
+        .output()
+        .map_err(|error| {
+            Error::Message(format!(
+                "Não foi possível executar o prepare-clip ({error}). Node e ffmpeg precisam estar no PATH."
+            ))
+        })?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let details = [stderr.trim(), stdout.trim()]
+            .into_iter()
+            .find(|line| !line.is_empty())
+            .unwrap_or("prepare-clip falhou.");
+        return Err(Error::Message(details.to_string()));
+    }
+
+    let thumb = folder.join(VIDEO_THUMB_FILE);
+    if !thumb.is_file() {
+        return Err(Error::Message("Não foi possível gerar thumb.jpg para o clip.".into()));
+    }
+    Ok((dest, thumb, TempDir(root)))
+}
+
 fn image_object_name(path: &Path) -> Result<String, Error> {
     let stem = file_stem(path)?;
     let ext = extension(path);
@@ -445,11 +526,9 @@ fn build_client() -> Result<Settings, Error> {
         })
         .unwrap_or_else(|| "us-east-1".into());
     let bucket = normalize_bucket(&required_env("AWS_S3_BUCKET")?);
-    let public_base_url = std::env::var("AWS_S3_PUBLIC_BASE_URL")
-        .ok()
-        .map(|value| value.trim().trim_end_matches('/').to_string())
-        .filter(|value| !value.is_empty())
-        .unwrap_or_else(|| format!("https://{bucket}.s3.{region}.amazonaws.com"));
+    let public_base_url = optional_env("AWS_S3_PUBLIC_BASE_URL")
+        .or_else(|| optional_env("VITE_MEDIA_BUCKET_URL"))
+        .unwrap_or_else(|| DEFAULT_PUBLIC_ASSET_BASE_URL.to_string());
 
     let credentials = Credentials::new(access_key, secret_key, None, None, "media-panel-env");
     let config = aws_sdk_s3::Config::builder()
@@ -1057,7 +1136,20 @@ pub async fn upload_media(
     };
 
     let mime_name = path_file_name(&object_path).or_else(|_| path_file_name(&source))?;
-    let body = ByteStream::from_path(&source)
+    let stem = file_stem(&object_path).or_else(|_| file_stem(&source))?;
+    let mut upload_source = source.clone();
+    let mut prepared_thumb: Option<PathBuf> = None;
+    let _prepared_dir;
+    if kind == "video" {
+        let (video, thumb, tmp) = prepare_uploaded_clip(&source, &stem)?;
+        upload_source = video;
+        prepared_thumb = Some(thumb);
+        _prepared_dir = Some(tmp);
+    } else {
+        _prepared_dir = None;
+    }
+
+    let body = ByteStream::from_path(&upload_source)
         .await
         .map_err(|error| Error::Message(format!("Não foi possível ler o arquivo: {error}")))?;
 
@@ -1071,6 +1163,29 @@ pub async fn upload_media(
         .send()
         .await
         .map_err(|error| Error::S3(error.to_string()))?;
+
+    if let Some(thumb) = prepared_thumb {
+        let thumb_key = format!("{game}/videos/{stem}/{VIDEO_THUMB_FILE}");
+        let thumb_body = ByteStream::from_path(&thumb)
+            .await
+            .map_err(|error| Error::Message(format!("Não foi possível ler thumb.jpg: {error}")))?;
+        settings
+            .client
+            .put_object()
+            .bucket(&settings.bucket)
+            .key(&thumb_key)
+            .body(thumb_body)
+            .content_type("image/jpeg")
+            .send()
+            .await
+            .map_err(|error| Error::S3(error.to_string()))?;
+        if let (Ok(bytes), Some(path)) = (std::fs::read(&thumb), cache::asset_path(&thumb_key)) {
+            if let Some(parent) = path.parent() {
+                let _ = std::fs::create_dir_all(parent);
+            }
+            let _ = std::fs::write(path, bytes);
+        }
+    }
 
     if kind_updates_game_metadata(&kind) {
         refresh_game_metadata(game.clone()).await?;

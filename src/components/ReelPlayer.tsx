@@ -6,12 +6,17 @@ import { driveAssetService } from '../services/driveAssetService';
 import { gameDetailsPath } from '../libraryContext';
 import { formatMediaCapturedAt } from '../utils/mediaSort';
 import { releaseMediaElement } from '../utils/releaseMediaElement';
+import { useVideoLoadAppearance } from '../hooks/useVideoLoadAppearance';
+import { VideoBufferOverlay, VideoSkeletonOverlay } from './VideoLoadOverlays';
 import {
   REEL_HOLD_MS,
   REEL_IMAGE_DURATION_MS,
   REEL_SNAP_MS,
   REEL_SWIPE_PX,
   REEL_TAP_PX,
+  reelFetchPriorityForAttach,
+  reelPreloadForAttach,
+  type ReelAttachMode,
 } from '../utils/reelFeed';
 
 interface ReelPlayerProps {
@@ -70,6 +75,7 @@ export const ReelPlayer: React.FC<ReelPlayerProps> = ({
   const [soundOn, setSoundOn] = useState(false);
   const [progress, setProgress] = useState(0);
   const [ready, setReady] = useState(false);
+  const [canWarmNext, setCanWarmNext] = useState(false);
   const soundOnRef = useRef(false);
 
   offsetRef.current = offset;
@@ -115,6 +121,7 @@ export const ReelPlayer: React.FC<ReelPlayerProps> = ({
     setHolding(false);
     setProgress(0);
     setReady(current ? loadedIdsRef.current.has(current.media.id) : false);
+    setCanWarmNext(false);
     onRestartWatch();
   }, [current?.media.id, onRestartWatch]);
 
@@ -424,9 +431,10 @@ export const ReelPlayer: React.FC<ReelPlayerProps> = ({
                 progress={isCurrent ? progress : 0}
                 ready={!isCurrent || ready}
                 loading={isCurrent ? !entry && loading : pendingNext}
-                attach={isCurrent ? 'play' : role === 'next' ? 'preload' : 'keep'}
+                attach={isCurrent ? 'play' : role === 'next' ? (canWarmNext ? 'warm' : 'metadata') : 'keep'}
                 muted={!soundOn}
                 videoRef={isCurrent ? videoRef : undefined}
+                onBuffered={isCurrent ? () => setCanWarmNext(true) : undefined}
                 onReady={
                   isCurrent
                     ? () => {
@@ -510,6 +518,7 @@ function ReelSlide({
   muted = true,
   videoRef,
   onReady,
+  onBuffered,
   onEnded,
 }: {
   entry: ReelEntry | null;
@@ -519,10 +528,11 @@ function ReelSlide({
   progress?: number;
   ready?: boolean;
   loading?: boolean;
-  attach?: 'play' | 'keep' | 'preload';
+  attach?: ReelAttachMode;
   muted?: boolean;
   videoRef?: React.RefObject<HTMLVideoElement | null>;
   onReady?: () => void;
+  onBuffered?: () => void;
   onEnded?: () => void;
 }) {
   const localVideoRef = useRef<HTMLVideoElement | null>(null);
@@ -530,29 +540,55 @@ function ReelSlide({
   const onReadyRef = useRef(onReady);
   onReadyRef.current = onReady;
   const isVideo = entry?.media.type === 'video';
+  const videoSrc = isVideo ? entry?.src ?? '' : '';
+  const { initial, buffering, markFrame, markWaiting } = useVideoLoadAppearance(videoSrc);
   const capturedAt = entry
     ? formatMediaCapturedAt(entry.media.name, entry.media.createdTime)
     : null;
 
-  const setVideoNode = (node: HTMLVideoElement | null) => {
-    if (localVideoRef.current && localVideoRef.current !== node) {
+  useEffect(() => {
+    if (!videoRef) return;
+    videoRef.current = localVideoRef.current;
+    return () => {
+      if (videoRef.current === localVideoRef.current) {
+        videoRef.current = null;
+      }
+    };
+  }, [videoRef, videoSrc]);
+
+  useEffect(() => {
+    return () => {
       releaseMediaElement(localVideoRef.current);
-    }
-    localVideoRef.current = node;
-    if (videoRef) videoRef.current = node;
-  };
+    };
+  }, []);
 
   useEffect(() => {
     const video = localVideoRef.current;
     if (!video || !isVideo) return;
+    if (video.getAttribute('src') !== videoSrc) {
+      video.src = videoSrc;
+    }
     const becamePlaying = playing && !wasPlayingRef.current;
     wasPlayingRef.current = playing;
-    if (becamePlaying && video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
-      video.currentTime = 0;
-      onReadyRef.current?.();
+    if (becamePlaying) {
+      if (video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
+        video.currentTime = 0;
+        markFrame();
+        onReadyRef.current?.();
+      }
+      video.muted = muted;
+      video.defaultMuted = muted;
+      void video.play().catch(() => {});
     }
     if (!playing && !holding) video.pause();
-  }, [playing, holding, isVideo]);
+  }, [playing, holding, isVideo, markFrame, muted, videoSrc]);
+
+  useEffect(() => {
+    const video = localVideoRef.current;
+    if (!video || !isVideo) return;
+    const preload = reelPreloadForAttach(attach);
+    if (video.preload !== preload) video.preload = preload;
+  }, [attach, isVideo]);
 
   return (
     <div className="relative h-full w-full overflow-hidden bg-black">
@@ -570,15 +606,40 @@ function ReelSlide({
       <div className="relative z-10 flex h-full w-full items-center justify-center">
         {entry && isVideo ? (
           <video
-            ref={setVideoNode}
+            ref={localVideoRef}
             src={entry.src}
             muted={muted}
             defaultMuted={muted}
             playsInline
-            preload={attach === 'keep' ? 'none' : 'auto'}
+            preload={reelPreloadForAttach(attach)}
+            fetchPriority={reelFetchPriorityForAttach(attach)}
             className="max-h-full max-w-full object-contain"
-            onLoadedData={onReady}
-            onPlaying={onReady}
+            onWaiting={markWaiting}
+            onStalled={markWaiting}
+            onSeeking={markWaiting}
+            onProgress={(event) => {
+              if (event.currentTarget.readyState >= HTMLMediaElement.HAVE_FUTURE_DATA) {
+                onBuffered?.();
+              }
+            }}
+            onCanPlay={(event) => {
+              if (event.currentTarget.readyState >= HTMLMediaElement.HAVE_FUTURE_DATA) {
+                onBuffered?.();
+              }
+            }}
+            onCanPlayThrough={() => onBuffered?.()}
+            onLoadedMetadata={() => {
+              if (attach !== 'play') onReady?.();
+            }}
+            onLoadedData={() => {
+              markFrame();
+              onReady?.();
+            }}
+            onPlaying={() => {
+              markFrame();
+              onReady?.();
+            }}
+            onSeeked={markFrame}
             onEnded={onEnded}
           />
         ) : entry ? (
@@ -587,14 +648,26 @@ function ReelSlide({
             alt={entry.game.name}
             className="max-h-full max-w-full object-contain"
             draggable={false}
-            onLoad={() => onReady?.()}
+            fetchPriority={reelFetchPriorityForAttach(attach)}
+            decoding={attach === 'play' ? 'sync' : 'async'}
+            onLoad={() => {
+              onReady?.();
+              onBuffered?.();
+            }}
           />
         ) : null}
       </div>
 
-      {(loading || (entry && !ready && playing)) && (
-        <div className="image-shimmer pointer-events-none absolute inset-0 z-20" />
-      )}
+      {loading || (entry && playing && (isVideo ? initial : !ready)) ? (
+        <div className="pointer-events-none absolute inset-0 z-20">
+          <VideoSkeletonOverlay poster={isVideo ? undefined : entry?.src} />
+        </div>
+      ) : null}
+      {entry && isVideo && buffering && !initial ? (
+        <div className="pointer-events-none absolute inset-0 z-20">
+          <VideoBufferOverlay />
+        </div>
+      ) : null}
 
       <div className="pointer-events-none absolute inset-x-0 top-0 z-30 h-24 bg-gradient-to-b from-black/50 to-transparent" />
       <div className="pointer-events-none absolute inset-x-0 bottom-0 z-30 h-36 bg-gradient-to-t from-black/70 to-transparent" />

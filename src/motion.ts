@@ -15,6 +15,11 @@ export const overlayTransition = {
   ease: EASE_OUT,
 };
 
+export const mediaSlideTransition = {
+  duration: 0.34,
+  ease: EASE_OUT,
+};
+
 export function revealDelay(index: number, groupSize = 12): number {
   return Math.min(index % groupSize, groupSize - 1) * 0.035;
 }

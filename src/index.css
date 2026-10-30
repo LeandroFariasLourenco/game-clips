@@ -48,6 +48,16 @@
   animation: fadeIn 0.35s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
+.video-buffer-spinner {
+  animation: video-buffer-spin 0.7s linear infinite;
+}
+
+@keyframes video-buffer-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .animate-fadeIn {
     animation: none;
@@ -55,6 +65,11 @@
 
   .image-shimmer::after {
     animation: none;
+  }
+
+  .video-buffer-spinner {
+    animation: none;
+    border-color: rgb(255 255 255 / 0.7);
   }
 }
 
@@ -128,8 +143,43 @@
   font-weight: 700;
 }
 
-.featured-media-reels .swiper-slide {
+.featured-media-reels .swiper {
+  width: 100%;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.featured-media-reels .swiper-wrapper {
   height: auto;
+  align-items: stretch;
+}
+
+.featured-media-reels .swiper-slide {
+  display: block;
+  height: auto;
+  align-self: stretch;
+}
+
+/* Firefox/Android: aspect-ratio inside Swiper height:auto collapses to 0.
+   Padding is based on the slide's definite width, so the card always has height. */
+.featured-media-reels .reel-card {
+  position: relative;
+  width: 100%;
+  height: 0;
+  padding-bottom: 177.78%;
+}
+
+.featured-media-reels .reel-card > button {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+@supports (-moz-appearance: none) {
+  .featured-media-reels .swiper-backface-hidden .swiper-slide {
+    backface-visibility: visible;
+  }
 }
 
 @keyframes featured-reel-zoom {

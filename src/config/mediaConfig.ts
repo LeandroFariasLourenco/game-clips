@@ -1,5 +1,5 @@
-export const DEFAULT_MEDIA_BUCKET_URL =
-  'https://game-clips-assets-306702688592-us-east-1-an.s3.us-east-1.amazonaws.com';
+/** Public CloudFront distribution. Override with VITE_MEDIA_BUCKET_URL. */
+export const DEFAULT_MEDIA_BUCKET_URL = 'https://d3nyc65v53ljin.cloudfront.net';
 
 export const DEFAULT_MEDIA_WORKER_URL = 'https://game-clips-worker.feleolive2010.workers.dev';
 
@@ -85,14 +85,6 @@ export function getGamesManifestUrl(): string {
   return gamesCatalogUrl(readRuntimeWorkerUrl());
 }
 
-export function gameImagesUrl(workerUrl: string, folderName: string): string {
-  return `${resolveMediaWorkerUrl(workerUrl)}/${encodeMediaPath([folderName, 'images'])}`;
-}
-
-export function getGameImagesUrl(folderName: string): string {
-  return gameImagesUrl(readRuntimeWorkerUrl(), folderName);
-}
-
 export const VIDEO_THUMB_FILE = 'thumb.jpg';
 const VIDEO_FILE_RE = /\.(mp4|webm|mkv|mov|avi)$/i;
 
@@ -121,7 +113,7 @@ export function sanitizeVideoSrc(raw: string): string {
 }
 
 /**
- * Large clips must not stream through the Worker (it 500s). Play them from the public bucket.
+ * Large clips must not stream through the Worker (it 500s). Play them from the CDN.
  */
 export function toPublicAssetUrl(raw: string): string {
   const href = sanitizeVideoSrc(raw);
@@ -166,25 +158,17 @@ export function videoUrlBesideThumb(
   }
 }
 
-export function gameVideosUrl(workerUrl: string, folderName: string): string {
-  return `${resolveMediaWorkerUrl(workerUrl)}/${encodeMediaPath([folderName, 'videos'])}`;
-}
-
-export function getGameVideosUrl(folderName: string): string {
-  return gameVideosUrl(readRuntimeWorkerUrl(), folderName);
-}
-
 export function gameMetadataUrl(base: string, folderName: string): string {
   return `${normalizeBucketUrl(base)}/${encodeMediaPath([folderName, GAME_METADATA_FILE])}`;
 }
 
-/** Dev reads the bucket through the Vite proxy. Production uses the worker, which adds CORS. */
+/** Dev reads through the Vite proxy. Production reads metadata.json from the CDN. */
 export function getGameMetadataUrl(folderName: string): string {
   const path = encodeMediaPath([folderName, GAME_METADATA_FILE]);
   if (import.meta.env?.DEV) {
     return `${DEV_MEDIA_PROXY_PREFIX}/${path}`;
   }
-  return `${readRuntimeWorkerUrl()}/${path}`;
+  return `${getMediaBaseUrl()}/${path}`;
 }
 
 export function getMediaLibraryLabel(): string {

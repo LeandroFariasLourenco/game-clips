@@ -93,7 +93,7 @@ export default function App() {
   return (
     <LibraryContext.Provider value={outletContext}>
     <MotionConfig reducedMotion="user">
-    <div className={`${isReels ? 'h-dvh overflow-hidden' : 'min-h-screen'} bg-[#121212] text-zinc-100 flex flex-col selection:bg-purple-600 selection:text-white overflow-x-clip`}>
+    <div className={`${isReels ? 'h-dvh overflow-hidden' : 'min-h-screen'} bg-[#121212] text-zinc-100 flex flex-col selection:bg-purple-600 selection:text-white overflow-x-hidden`}>
       <ScrollRestoration getKey={(location) => location.pathname} />
 
       {syncNotification && !isReels && (

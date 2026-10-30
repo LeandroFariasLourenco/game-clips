@@ -44,6 +44,7 @@ export function useReelsFeed(games: Game[], active: boolean) {
       }
       seenIds.current.add(incoming.media.id);
       setStack((prev) => {
+        if (prev.some((item) => item.media.id === incoming.media.id)) return prev;
         const kept = prev.slice(0, indexRef.current + (last ? 1 : 0));
         const nextStack = last ? [...kept, incoming] : [incoming];
         stackRef.current = nextStack;
@@ -65,6 +66,12 @@ export function useReelsFeed(games: Game[], active: boolean) {
   }, [active, games, appendReel]);
 
   useEffect(() => {
+    if (!active || !current) return;
+    if (stackRef.current[indexRef.current + 1] || loadingRef.current) return;
+    void appendReel(classifyReelWatch(completedRef.current));
+  }, [active, appendReel, current?.media.id]);
+
+  useEffect(() => {
     if (active) return;
     abortReelLoad();
     requestId.current += 1;
@@ -74,14 +81,9 @@ export function useReelsFeed(games: Game[], active: boolean) {
   }, [active]);
 
   const prefetchNext = useCallback(() => {
-    const ahead = stackRef.current[indexRef.current + 1];
-    const outcome = classifyReelWatch(completedRef.current);
-    if (ahead && outcome !== 'completed') return;
-    if (ahead) {
-      setStack((prev) => prev.slice(0, indexRef.current + 1));
-    }
-    if (loadingRef.current && outcome !== 'completed') return;
-    void appendReel(outcome);
+    if (stackRef.current[indexRef.current + 1]) return;
+    if (loadingRef.current) return;
+    void appendReel(classifyReelWatch(completedRef.current));
   }, [appendReel]);
 
   const commitNext = useCallback(() => {

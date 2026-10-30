@@ -1,6 +1,5 @@
 const fs = require('fs');
 const path = require('path');
-const { spawnSync } = require('child_process');
 
 const {
   buildStandardizedMediaName,
@@ -9,6 +8,7 @@ const {
   parseStandardizedMediaName,
   readItemDates,
 } = require('./item-date.cjs');
+const { prepareVideoFile } = require('./prepare-clip.cjs');
 
 const VIDEO_EXTENSIONS = new Set(['.mp4', '.webm', '.mkv', '.mov']);
 const IMAGE_EXTENSIONS = new Set(['.jpg', '.jpeg', '.png', '.webp']);
@@ -51,6 +51,8 @@ function emptyStats() {
     videos: 0,
     existing: 0,
     generated: 0,
+    faststart: 0,
+    alreadyFaststart: 0,
     skipped: 0,
     failed: 0,
     failures: [],
@@ -339,71 +341,27 @@ function runFolders(options, stats) {
   });
 }
 
-function hasThumbnail(entries, force) {
-  if (force) return false;
-  return entries.some((entry) => {
-    if (!entry.isFile()) return false;
-    const name = entry.name.toLowerCase();
-    return name === THUMB_FILENAME || isImageFile(entry.name);
-  });
-}
-
 function findVideoInFolder(entries) {
   return entries.find((entry) => entry.isFile() && isVideoFile(entry.name)) || null;
 }
 
-function ensureFfmpeg() {
-  const probe = spawnSync('ffmpeg', ['-version'], { encoding: 'utf8' });
-  if (probe.error || probe.status !== 0) {
-    throw new Error('ffmpeg não encontrado no PATH. Instale o ffmpeg para gerar as thumbnails.');
+function recordClipResult(result, relativeFolder, stats, { logFaststart, logThumb }) {
+  if (result.faststart === 'already') stats.alreadyFaststart += 1;
+  else if (result.faststart === 'remuxed' || result.faststart === 'dry-run') {
+    stats.faststart += 1;
+    if (logFaststart) {
+      const suffix = result.faststart === 'dry-run' ? ' (dry-run)' : '';
+      console.log(`  ★ faststart${suffix}: ${relativeFolder}/${path.basename(result.videoPath)}`);
+    }
   }
-}
 
-function probeDurationSeconds(videoPath) {
-  const result = spawnSync(
-    'ffprobe',
-    ['-v', 'error', '-show_entries', 'format=duration', '-of', 'default=noprint_wrappers=1:nokey=1', videoPath],
-    { encoding: 'utf8' },
-  );
-  const duration = Number.parseFloat((result.stdout || '').trim());
-  return Number.isFinite(duration) && duration > 0 ? duration : 0;
-}
-
-function seekTimeFor(duration) {
-  if (duration <= 0) return 0;
-  const tenth = duration * 0.1;
-  return Math.min(Math.max(tenth, 0.1), Math.max(duration - 0.05, 0), 3);
-}
-
-function extractThumbnail(videoPath, outputPath) {
-  ensureFfmpeg();
-  const seek = seekTimeFor(probeDurationSeconds(videoPath)).toFixed(3);
-  const args = [
-    '-hide_banner',
-    '-loglevel',
-    'error',
-    '-y',
-    '-ss',
-    seek,
-    '-i',
-    videoPath,
-    '-frames:v',
-    '1',
-    '-vf',
-    'scale=1280:-2',
-    '-q:v',
-    '3',
-    outputPath,
-  ];
-
-  let result = spawnSync('ffmpeg', args, { encoding: 'utf8' });
-  if (result.status === 0 && fs.existsSync(outputPath)) return;
-
-  const fallbackArgs = args.map((value, index) => (index === 5 ? '0' : value));
-  result = spawnSync('ffmpeg', fallbackArgs, { encoding: 'utf8' });
-  if (result.status !== 0 || !fs.existsSync(outputPath)) {
-    const details = (result.stderr || result.error?.message || 'ffmpeg falhou').trim();
-    throw new Error(details);
+  if (result.thumb === 'existing') stats.existing += 1;
+  else if (result.thumb === 'generated' || result.thumb === 'dry-run') {
+    stats.generated += 1;
+    if (logThumb) {
+      const suffix = result.thumb === 'dry-run' ? ' (dry-run)' : '';
+      console.log(`  ★ thumb${suffix}: ${relativeFolder}/${THUMB_FILENAME}`);
+    }
   }
 }
 
@@ -423,27 +381,16 @@ function processVideoFolder(gameName, folderPath, options, stats) {
   }
 
   stats.videos += 1;
-
-  if (hasThumbnail(entries, options.force)) {
-    stats.existing += 1;
-    return;
-  }
-
-  const thumbPath = path.join(folderPath, THUMB_FILENAME);
-  if (options.dryRun) {
-    stats.generated += 1;
-    console.log(`  ★ thumb (dry-run): ${relativeFolder}/${THUMB_FILENAME}`);
-    return;
-  }
-
   try {
-    extractThumbnail(path.join(folderPath, videoEntry.name), thumbPath);
-    stats.generated += 1;
-    console.log(`  ★ thumb: ${relativeFolder}/${THUMB_FILENAME}`);
+    const result = prepareVideoFile(path.join(folderPath, videoEntry.name), {
+      force: options.force,
+      dryRun: options.dryRun,
+    });
+    recordClipResult(result, relativeFolder, stats, { logFaststart: true, logThumb: true });
   } catch (error) {
     stats.failed += 1;
     stats.failures.push(`${relativeFolder}: ${error.message}`);
-    console.error(`  ✖ falha na thumb de ${relativeFolder}: ${error.message}`);
+    console.error(`  ✖ falha ao preparar ${relativeFolder}: ${error.message}`);
   }
 }
 
@@ -502,7 +449,7 @@ function runMetadata(options, stats) {
   const publicBaseUrl = String(options.publicBaseUrl || '').replace(/\/+$/, '');
   if (!publicBaseUrl) {
     throw new Error(
-      'Defina a URL pública do bucket (--base-url, AWS_S3_PUBLIC_BASE_URL ou VITE_MEDIA_BUCKET_URL).',
+      'Defina a URL pública da distribuição (--base-url, AWS_S3_PUBLIC_BASE_URL ou VITE_MEDIA_BUCKET_URL).',
     );
   }
 
@@ -530,6 +477,39 @@ function runMetadata(options, stats) {
       stats.failed += 1;
       stats.failures.push(`${gameName}: ${error.message}`);
       console.error(`  ✖ falha no metadata de ${gameName}: ${error.message}`);
+    }
+  });
+}
+
+function runFaststart(options, stats) {
+  console.log(`Aplicando faststart em: ${options.root}`);
+  if (options.dryRun) console.log('Dry-run: nenhum MP4 será remuxado.\n');
+  else console.log('');
+
+  stats.games = forEachGame(options.root, ({ gameName, videosDir, hasVideos }) => {
+    if (!hasVideos) return;
+    for (const folder of listDir(videosDir).filter((entry) => entry.isDirectory())) {
+      const folderPath = path.join(videosDir, folder.name);
+      const entries = listDir(folderPath);
+      const videoEntry = findVideoInFolder(entries);
+      if (!videoEntry) {
+        stats.skipped += 1;
+        continue;
+      }
+      stats.videos += 1;
+      const relativeFolder = `${gameName}/videos/${folder.name}`;
+      try {
+        const result = prepareVideoFile(path.join(folderPath, videoEntry.name), {
+          force: options.force,
+          dryRun: options.dryRun,
+          thumb: false,
+        });
+        recordClipResult(result, relativeFolder, stats, { logFaststart: true, logThumb: false });
+      } catch (error) {
+        stats.failed += 1;
+        stats.failures.push(`${relativeFolder}: ${error.message}`);
+        console.error(`  ✖ falha no faststart de ${relativeFolder}: ${error.message}`);
+      }
     }
   });
 }
@@ -574,6 +554,7 @@ module.exports = {
   finish,
   parseArgs,
   printSummary,
+  runFaststart,
   runFolders,
   runMetadata,
   runNames,

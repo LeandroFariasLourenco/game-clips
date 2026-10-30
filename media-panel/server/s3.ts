@@ -1,4 +1,6 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { basename, extname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -39,10 +41,12 @@ import {
   metadataMediaPaths,
   metadataObjectKey,
   parseGameMetadata,
+  resolvePublicAssetBaseUrl,
   serializeGameMetadata,
   type GameMetadata,
   type GameMetadataWriteResult,
 } from "./gameMetadata.ts";
+import { VIDEO_THUMB_FILE, prepareVideoFile } from "./prepareClip.ts";
 
 export class HttpError extends Error {
   status: number;
@@ -95,8 +99,7 @@ export interface GamesCatalog {
   cachedAt: string | null;
 }
 
-export function loadEnv() {
-  const envPath = join(ROOT, ".env");
+function applyEnvFile(envPath: string) {
   try {
     for (const line of readFileSync(envPath, "utf8").split("\n")) {
       const trimmed = line.trim();
@@ -104,12 +107,17 @@ export function loadEnv() {
       const index = trimmed.indexOf("=");
       if (index < 0) continue;
       const key = trimmed.slice(0, index).trim();
-      const value = trimmed.slice(index + 1).trim();
+      const value = trimmed.slice(index + 1).trim().replace(/^["']|["']$/g, "");
       if (!process.env[key]) process.env[key] = value;
     }
   } catch {
     // O painel ainda pode usar variáveis já exportadas no ambiente.
   }
+}
+
+export function loadEnv() {
+  applyEnvFile(join(ROOT, ".env"));
+  applyEnvFile(join(ROOT, "..", ".env"));
 }
 
 function required(name: string): string {
@@ -183,9 +191,10 @@ export function getS3() {
   loadEnv();
   const region = process.env.AWS_REGION?.trim() || process.env.AWS_DEFAULT_REGION?.trim() || "us-east-1";
   const bucket = required("AWS_S3_BUCKET").replace(/^s3:\/\//, "").replace(/\/+$/, "");
-  const publicBaseUrl =
-    process.env.AWS_S3_PUBLIC_BASE_URL?.trim().replace(/\/+$/, "") ||
-    `https://${bucket}.s3.${region}.amazonaws.com`;
+  const publicBaseUrl = resolvePublicAssetBaseUrl(
+    process.env.AWS_S3_PUBLIC_BASE_URL,
+    process.env.VITE_MEDIA_BUCKET_URL,
+  );
 
   cached = {
     bucket,
@@ -519,6 +528,27 @@ export async function getAsset(
   });
 }
 
+async function prepareUploadedVideo(body: Buffer, fileName: string): Promise<{ video: Buffer; thumb: Buffer }> {
+  const stem = basename(fileName, extname(fileName));
+  const root = await mkdtemp(join(tmpdir(), "game-clips-upload-"));
+  const folder = join(root, stem);
+  const videoPath = join(folder, `${stem}.mp4`);
+  await mkdir(folder, { recursive: true });
+  await writeFile(videoPath, body);
+  try {
+    const prepared = prepareVideoFile(videoPath);
+    if (!prepared.thumbPath || !existsSync(prepared.thumbPath)) {
+      throw new Error("Não foi possível gerar thumb.jpg para o clip.");
+    }
+    return {
+      video: await readFile(prepared.videoPath),
+      thumb: await readFile(prepared.thumbPath),
+    };
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+}
+
 export async function uploadMedia(input: {
   game: string;
   kind: string;
@@ -566,17 +596,38 @@ export async function uploadMedia(input: {
       throw new Error(`Tipo de upload desconhecido: ${input.kind}`);
   }
 
+  let body = input.body;
+  let thumbBody: Buffer | null = null;
+  if (input.kind === "video") {
+    const prepared = await prepareUploadedVideo(input.body, input.fileName);
+    body = prepared.video;
+    thumbBody = prepared.thumb;
+  }
+
   await client.send(
     new PutObjectCommand({
       Bucket: bucket,
       Key: key,
-      Body: input.body,
+      Body: body,
       ContentType: input.contentType || mimeOf(input.fileName),
     }),
   );
 
+  if (thumbBody) {
+    const thumbKey = `${game}/videos/${stem}/${VIDEO_THUMB_FILE}`;
+    await client.send(
+      new PutObjectCommand({
+        Bucket: bucket,
+        Key: thumbKey,
+        Body: thumbBody,
+        ContentType: "image/jpeg",
+      }),
+    );
+    await writeAsset(thumbKey, thumbBody);
+  }
+
   if (input.kind !== "video") {
-    await writeAsset(key, input.body);
+    await writeAsset(key, body);
   }
   if (kindUpdatesGameMetadata(input.kind)) {
     await refreshGameMetadata(game);

@@ -8,7 +8,9 @@ export interface Game {
   developer?: string;
   releaseYear?: number;
   subfolderName: string; // folder name inside Biblioteca_de_Jogos
-  cover?: string; // URL absoluta da capa (resposta do worker)
+  cover?: string; // URL absoluta da capa (catálogo do worker → CloudFront)
+  banner?: string; // URL absoluta do banner
+  icon?: string; // URL absoluta do ícone
   customCoverUrl?: string; // override cover if available
   customBannerUrl?: string; // override banner if available
   favorite?: boolean;
