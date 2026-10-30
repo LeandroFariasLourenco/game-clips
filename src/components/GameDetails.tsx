@@ -1,6 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useCallback, useState, useEffect } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
+import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { Game, GameMedia } from '../types/game';
+import { findGameByName } from '../libraryContext';
 import { localAssetService } from '../services/driveAssetService';
 import { localLibraryService } from '../services/driveService';
 import { collectGameMediaCacheUrls, warmMediaCache } from '../services/mediaCache';
@@ -20,7 +22,7 @@ import { MediaPreview } from './MediaPreview';
 import { ShimmerImage } from '../directives/ShimmerImage';
 import { revealDelay, revealTransition } from '../motion';
 
-const MEDIA_PAGE_SIZE = 8;
+const MEDIA_PAGE_SIZE = 4;
 
 type MediaTab = 'all' | 'screenshot' | 'video' | 'backup';
 
@@ -28,14 +30,60 @@ interface GameDetailsProps {
   game: Game;
 }
 
+type MediaViewerLocationState = {
+  mediaViewer?: boolean;
+};
+
 export const GameDetails: React.FC<GameDetailsProps> = ({ game }) => {
+  const location = useLocation();
+  const navigate = useNavigate();
+  const params = useParams<{ gameName: string }>();
+  const [searchParams] = useSearchParams();
   const [mediaList, setMediaList] = useState<GameMedia[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<MediaTab>('all');
   const [visibleImagesCount, setVisibleImagesCount] = useState(MEDIA_PAGE_SIZE);
   const [visibleVideosCount, setVisibleVideosCount] = useState(MEDIA_PAGE_SIZE);
   const [visibleBackupsCount, setVisibleBackupsCount] = useState(MEDIA_PAGE_SIZE);
-  const [selectedMedia, setSelectedMedia] = useState<GameMedia | null>(null);
+
+  const isActiveRoute = Boolean(findGameByName([game], params.gameName));
+  const mediaId = isActiveRoute ? searchParams.get('media') : null;
+  const selectedMedia = mediaId
+    ? mediaList.find((item) => item.id === mediaId) ?? null
+    : null;
+
+  const openMedia = useCallback(
+    (item: GameMedia) => {
+      const next = new URLSearchParams(searchParams);
+      next.set('media', item.id);
+      const search = next.toString();
+      navigate(
+        { pathname: location.pathname, search: search ? `?${search}` : '' },
+        {
+          replace: searchParams.has('media'),
+          preventScrollReset: true,
+          state: { mediaViewer: true } satisfies MediaViewerLocationState,
+        }
+      );
+    },
+    [location.pathname, navigate, searchParams]
+  );
+
+  const closeMedia = useCallback(() => {
+    if (!searchParams.has('media')) return;
+    const state = location.state as MediaViewerLocationState | null;
+    if (state?.mediaViewer && window.history.length > 1) {
+      navigate(-1);
+      return;
+    }
+    const next = new URLSearchParams(searchParams);
+    next.delete('media');
+    const search = next.toString();
+    navigate(
+      { pathname: location.pathname, search: search ? `?${search}` : '' },
+      { replace: true, preventScrollReset: true }
+    );
+  }, [location.pathname, location.state, navigate, searchParams]);
 
   // Branding assets from the public media bucket
   const [bannerUrl, setBannerUrl] = useState<string | null>(() =>
@@ -204,11 +252,11 @@ export const GameDetails: React.FC<GameDetailsProps> = ({ game }) => {
       </div>
 
       {/* Media Filter Tabs */}
-      <div className="sticky top-0 z-20 -mx-4 sm:-mx-6 lg:-mx-8 mt-6 bg-[#121212]/92 backdrop-blur-md border-b border-zinc-800/80">
-        <div className="flex flex-nowrap items-center gap-2 overflow-x-auto px-4 sm:px-6 lg:px-8 py-3 scrollbar-none [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+      <div className="sticky top-0 z-20 -mx-4 sm:-mx-6 lg:-mx-8 mt-6 min-w-0 overflow-x-clip bg-[#121212]/92 backdrop-blur-md border-b border-zinc-800/80">
+        <div className="flex flex-wrap items-center gap-2 px-4 sm:px-6 lg:px-8 py-3">
           <button
             onClick={() => selectTab('all')}
-            className={`px-3.5 py-1.5 rounded-full text-xs font-medium transition cursor-pointer shrink-0 ${
+            className={`px-3.5 py-1.5 rounded-full text-xs font-medium transition cursor-pointer ${
               activeTab === 'all'
                 ? 'bg-purple-600 text-white shadow-md shadow-purple-600/30'
                 : 'bg-zinc-900 text-zinc-400 hover:text-zinc-200 border border-zinc-800'
@@ -218,7 +266,7 @@ export const GameDetails: React.FC<GameDetailsProps> = ({ game }) => {
           </button>
           <button
             onClick={() => selectTab('screenshot')}
-            className={`px-3.5 py-1.5 rounded-full text-xs font-medium transition cursor-pointer flex items-center gap-1.5 shrink-0 ${
+            className={`px-3.5 py-1.5 rounded-full text-xs font-medium transition cursor-pointer flex items-center gap-1.5 ${
               activeTab === 'screenshot'
                 ? 'bg-purple-600 text-white shadow-md shadow-purple-600/30'
                 : 'bg-zinc-900 text-zinc-400 hover:text-zinc-200 border border-zinc-800'
@@ -229,7 +277,7 @@ export const GameDetails: React.FC<GameDetailsProps> = ({ game }) => {
           </button>
           <button
             onClick={() => selectTab('video')}
-            className={`px-3.5 py-1.5 rounded-full text-xs font-medium transition cursor-pointer flex items-center gap-1.5 shrink-0 ${
+            className={`px-3.5 py-1.5 rounded-full text-xs font-medium transition cursor-pointer flex items-center gap-1.5 ${
               activeTab === 'video'
                 ? 'bg-purple-600 text-white shadow-md shadow-purple-600/30'
                 : 'bg-zinc-900 text-zinc-400 hover:text-zinc-200 border border-zinc-800'
@@ -241,7 +289,7 @@ export const GameDetails: React.FC<GameDetailsProps> = ({ game }) => {
           {backupsList.length > 0 && (
             <button
               onClick={() => selectTab('backup')}
-              className={`px-3.5 py-1.5 rounded-full text-xs font-medium transition cursor-pointer flex items-center gap-1.5 shrink-0 ${
+              className={`px-3.5 py-1.5 rounded-full text-xs font-medium transition cursor-pointer flex items-center gap-1.5 ${
                 activeTab === 'backup'
                   ? 'bg-purple-600 text-white shadow-md shadow-purple-600/30'
                   : 'bg-zinc-900 text-zinc-400 hover:text-zinc-200 border border-zinc-800'
@@ -277,9 +325,8 @@ export const GameDetails: React.FC<GameDetailsProps> = ({ game }) => {
               <MediaSection
                 title="Imagens"
                 icon={<ImageIcon className="w-4 h-4 text-purple-400" />}
-                countLabel={`${imagesList.length} ${imagesList.length === 1 ? 'imagem' : 'imagens'}`}
                 items={visibleImages}
-                onOpen={setSelectedMedia}
+                onOpen={openMedia}
                 onLoadMore={
                   visibleImages.length < imagesList.length
                     ? () => setVisibleImagesCount((count) => count + MEDIA_PAGE_SIZE)
@@ -293,9 +340,8 @@ export const GameDetails: React.FC<GameDetailsProps> = ({ game }) => {
               <MediaSection
                 title="Vídeos"
                 icon={<Film className="w-4 h-4 text-rose-400" />}
-                countLabel={`${videosList.length} ${videosList.length === 1 ? 'vídeo' : 'vídeos'}`}
                 items={visibleVideos}
-                onOpen={setSelectedMedia}
+                onOpen={openMedia}
                 onLoadMore={
                   visibleVideos.length < videosList.length
                     ? () => setVisibleVideosCount((count) => count + MEDIA_PAGE_SIZE)
@@ -309,9 +355,8 @@ export const GameDetails: React.FC<GameDetailsProps> = ({ game }) => {
               <MediaSection
                 title="Saves & Backups"
                 icon={<Archive className="w-4 h-4 text-indigo-400" />}
-                countLabel={`${backupsList.length} ${backupsList.length === 1 ? 'arquivo' : 'arquivos'}`}
                 items={visibleBackups}
-                onOpen={setSelectedMedia}
+                onOpen={openMedia}
                 onLoadMore={
                   visibleBackups.length < backupsList.length
                     ? () => setVisibleBackupsCount((count) => count + MEDIA_PAGE_SIZE)
@@ -329,7 +374,7 @@ export const GameDetails: React.FC<GameDetailsProps> = ({ game }) => {
           <MediaViewerModal
             key={selectedMedia.id}
             media={selectedMedia}
-            onClose={() => setSelectedMedia(null)}
+            onClose={closeMedia}
           />
         )}
       </AnimatePresence>
@@ -340,7 +385,6 @@ export const GameDetails: React.FC<GameDetailsProps> = ({ game }) => {
 interface MediaSectionProps {
   title: string;
   icon: React.ReactNode;
-  countLabel: string;
   items: GameMedia[];
   remaining: number;
   onOpen: (item: GameMedia) => void;
@@ -350,21 +394,17 @@ interface MediaSectionProps {
 const MediaSection: React.FC<MediaSectionProps> = ({
   title,
   icon,
-  countLabel,
   items,
   remaining,
   onOpen,
   onLoadMore,
 }) => (
   <section>
-    <div className="flex items-center justify-between mb-4 px-1 gap-3">
-      <div className="flex items-center gap-2 min-w-0">
-        {icon}
-        <h2 className="text-sm font-bold tracking-wider uppercase text-zinc-200 font-sans">
-          {title}
-        </h2>
-      </div>
-      <span className="text-xs text-zinc-500 font-mono shrink-0">{countLabel}</span>
+    <div className="flex items-center mb-4 px-1 gap-2">
+      {icon}
+      <h2 className="text-sm font-bold tracking-wider uppercase text-zinc-200 font-sans">
+        {title}
+      </h2>
     </div>
 
     <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-4">

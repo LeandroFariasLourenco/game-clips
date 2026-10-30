@@ -4,6 +4,7 @@ export const DEFAULT_MEDIA_BUCKET_URL =
 export const DEFAULT_MEDIA_WORKER_URL = 'https://game-clips-worker.feleolive2010.workers.dev';
 
 export const GAMES_MANIFEST_FILE = 'games.json';
+export const GAME_METADATA_FILE = 'metadata.json';
 export const GAMES_CACHE_NAME = 'game-vault-games';
 export const MEDIA_CACHE_NAME = 'game-vault-media';
 export const CACHE_MEDIA_MESSAGE = 'CACHE_MEDIA';
@@ -140,6 +141,19 @@ export function gameVideosUrl(workerUrl: string, folderName: string): string {
 
 export function getGameVideosUrl(folderName: string): string {
   return gameVideosUrl(readRuntimeWorkerUrl(), folderName);
+}
+
+export function gameMetadataUrl(base: string, folderName: string): string {
+  return `${normalizeBucketUrl(base)}/${encodeMediaPath([folderName, GAME_METADATA_FILE])}`;
+}
+
+/** Dev reads the bucket through the Vite proxy. Production uses the worker, which adds CORS. */
+export function getGameMetadataUrl(folderName: string): string {
+  const path = encodeMediaPath([folderName, GAME_METADATA_FILE]);
+  if (import.meta.env?.DEV) {
+    return `${DEV_MEDIA_PROXY_PREFIX}/${path}`;
+  }
+  return `${readRuntimeWorkerUrl()}/${path}`;
 }
 
 export function getMediaLibraryLabel(): string {

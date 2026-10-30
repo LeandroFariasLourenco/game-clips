@@ -10,15 +10,35 @@ function ShimmerBox({ className }: { className: string }) {
 
 export const FeaturedGamesSkeleton: React.FC = () => (
   <section className="mb-4 sm:mb-10" aria-hidden="true">
-    <div className="flex items-center gap-2 mb-2 sm:mb-4 px-1">
-      <ShimmerBox className="w-5 h-5 rounded" />
-      <ShimmerBox className="h-3 w-36 rounded" />
+    <div className="flex items-center justify-between gap-3 mb-2 sm:mb-4 px-1">
+      <div className="flex items-center gap-2">
+        <ShimmerBox className="w-5 h-5 rounded" />
+        <ShimmerBox className="h-3 w-28 rounded" />
+      </div>
+      <ShimmerBox className="h-3 w-24 rounded" />
     </div>
     <ShimmerBox className="h-[176px] sm:h-[280px] md:h-[340px] rounded-xl sm:rounded-2xl border border-zinc-800/80" />
     <div className="flex justify-center gap-1.5 pt-3">
       <span className="w-1.5 h-1.5 rounded-full bg-zinc-700" />
       <span className="w-1.5 h-1.5 rounded-full bg-zinc-800" />
       <span className="w-1.5 h-1.5 rounded-full bg-zinc-800" />
+    </div>
+  </section>
+);
+
+export const FeaturedMediaSkeleton: React.FC = () => (
+  <section className="mb-4 sm:mb-10" aria-hidden="true">
+    <div className="flex items-center gap-2 mb-2 sm:mb-4 px-1">
+      <ShimmerBox className="w-5 h-5 rounded" />
+      <ShimmerBox className="h-3 w-36 rounded" />
+    </div>
+    <div className="flex gap-3 overflow-hidden sm:gap-4">
+      {Array.from({ length: 4 }, (_, index) => (
+        <ShimmerBox
+          key={index}
+          className="w-[78%] shrink-0 aspect-[9/16] rounded-2xl border border-zinc-800/80 sm:w-[38%] md:w-[34%] lg:w-[28%] xl:w-[22%]"
+        />
+      ))}
     </div>
   </section>
 );

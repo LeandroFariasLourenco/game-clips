@@ -1,17 +1,24 @@
 import React, { useEffect, useMemo } from 'react';
 import { FeaturedGamesCarousel } from '../components/FeaturedGamesCarousel';
+import { FeaturedMediaReels } from '../components/FeaturedMediaReels';
 import { GameGrid } from '../components/GameGrid';
-import { FeaturedGamesSkeleton, GameGridSkeleton } from '../components/LibraryHomeSkeleton';
+import {
+  FeaturedGamesSkeleton,
+  FeaturedMediaSkeleton,
+  GameGridSkeleton,
+} from '../components/LibraryHomeSkeleton';
 import { LibraryToolbar } from '../components/LibraryToolbar';
 import { useLibrary } from '../libraryContext';
 import { useDailyFeaturedGames } from '../hooks/useDailyFeaturedGames';
+import { useFeaturedMedia } from '../hooks/useFeaturedMedia';
 import { driveAssetService } from '../services/driveAssetService';
 import { warmMediaCache } from '../services/mediaCache';
 import { gamesWithoutFeatured } from '../utils/dailyFeaturedGames';
 
 export const HomePage: React.FC = () => {
   const { games, filteredGames, searchQuery, onRefreshLocal, isSyncing } = useLibrary();
-  const featuredGames = useDailyFeaturedGames(games);
+  const { featured: featuredGames, remainingMs: featuredRemainingMs } = useDailyFeaturedGames(games);
+  const { items: featuredMedia, loading: featuredMediaLoading } = useFeaturedMedia(featuredGames);
   const isSearching = Boolean(searchQuery.trim());
   const isInitialLoad = isSyncing && games.length === 0 && !isSearching;
 
@@ -34,7 +41,16 @@ export const HomePage: React.FC = () => {
         <FeaturedGamesSkeleton />
       ) : (
         !isSearching &&
-        featuredGames.length > 0 && <FeaturedGamesCarousel games={featuredGames} />
+        featuredGames.length > 0 && (
+          <>
+            <FeaturedGamesCarousel games={featuredGames} remainingMs={featuredRemainingMs} />
+            {featuredMediaLoading ? (
+              <FeaturedMediaSkeleton />
+            ) : (
+              <FeaturedMediaReels items={featuredMedia} />
+            )}
+          </>
+        )
       )}
 
       <LibraryToolbar />

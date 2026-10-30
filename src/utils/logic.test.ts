@@ -10,6 +10,7 @@ import {
   GAME_BRANDING_ASSETS,
   buildMediaFileUrl,
   gameImagesUrl,
+  gameMetadataUrl,
   gameVideosUrl,
   gamesCatalogUrl,
   matchBrandingAsset,
@@ -42,10 +43,18 @@ import {
   remainingMs,
 } from './featuredRotation';
 import {
+  featuredMediaRandom,
+  parseGameMetadata,
+  pickGameFeaturedMedia,
+  zipFeaturedHighlights,
+} from './featuredMedia';
+import {
   DAILY_FEATURED_COUNT,
   DAILY_FEATURED_STORAGE_KEY,
   getOrCreateDailyFeaturedGames,
   gamesWithoutFeatured,
+  msUntilNextDailyFeatured,
+  nextDailyFeaturedAt,
 } from './dailyFeaturedGames';
 
 test('verifyUserAccess allows authorized owner email and rejects others', () => {
@@ -434,4 +443,95 @@ test('daily featured games persist for the local day and are hidden from the lis
   const searchHits = catalog.filter((game) => game.name === first[0].name);
   assert.equal(searchHits.length, 1);
   assert.equal(searchHits[0].id, first[0].id);
+});
+
+test('next daily featured countdown targets the following local midnight', () => {
+  const afternoon = new Date(2026, 9, 29, 15, 30, 0);
+  const next = nextDailyFeaturedAt(afternoon);
+  assert.equal(next.getFullYear(), 2026);
+  assert.equal(next.getMonth(), 9);
+  assert.equal(next.getDate(), 30);
+  assert.equal(next.getHours(), 0);
+  assert.equal(next.getMinutes(), 0);
+  assert.equal(next.getSeconds(), 0);
+  assert.equal(msUntilNextDailyFeatured(afternoon), next.getTime() - afternoon.getTime());
+
+  const midnight = new Date(2026, 9, 30, 0, 0, 0);
+  const followingMidnight = nextDailyFeaturedAt(midnight);
+  assert.equal(followingMidnight.getDate(), 31);
+  assert.equal(msUntilNextDailyFeatured(midnight), 24 * 60 * 60 * 1000);
+});
+
+test('featured media draws up to two images and two videos from metadata.json', () => {
+  const game: Game = {
+    id: 'game-battlefield-6',
+    name: 'Battlefield 6',
+    playTimeMinutes: 0,
+    subfolderName: 'Battlefield 6',
+  };
+  const metadata = parseGameMetadata(
+    JSON.stringify({
+      images: [
+        'https://cdn.example/a.jpg',
+        'https://cdn.example/b.jpg',
+        'https://cdn.example/c.png',
+        'https://cdn.example/a.jpg',
+      ],
+      videos: [
+        { url: 'https://cdn.example/v1.mp4', thumb: 'https://cdn.example/t1.jpg' },
+        { url: 'https://cdn.example/v2.mp4', thumb: 'https://cdn.example/t2.jpg' },
+        { url: 'https://cdn.example/v3.mp4', thumb: '' },
+      ],
+    }),
+  );
+  assert.ok(metadata);
+
+  const random = featuredMediaRandom('2026-10-29:game-battlefield-6');
+  const first = pickGameFeaturedMedia(game, metadata, random);
+  const second = pickGameFeaturedMedia(
+    game,
+    metadata,
+    featuredMediaRandom('2026-10-29:game-battlefield-6'),
+  );
+
+  assert.equal(first.filter((item) => item.type === 'screenshot').length, 2);
+  assert.equal(first.filter((item) => item.type === 'video').length, 2);
+  assert.deepEqual(
+    first.map((item) => item.url),
+    second.map((item) => item.url),
+  );
+  assert.equal(first[0].type, 'video');
+  assert.equal(first[1].type, 'screenshot');
+  assert.equal(new Set(first.filter((item) => item.type === 'screenshot').map((item) => item.url)).size, 2);
+  assert.equal(first.find((item) => item.url.endsWith('v3.mp4'))?.thumbnailUrl, undefined);
+
+  const sparse = pickGameFeaturedMedia(
+    game,
+    { images: ['https://cdn.example/only.jpg'], videos: [] },
+    () => 0.4,
+  );
+  assert.equal(sparse.length, 1);
+  assert.equal(sparse[0].type, 'screenshot');
+  assert.equal(sparse[0].name, 'only.jpg');
+  assert.equal(pickGameFeaturedMedia(game, { images: [], videos: [] }).length, 0);
+
+  assert.equal(parseGameMetadata('not-json'), null);
+  assert.equal(parseGameMetadata('{"images":[]}'), null);
+
+  const zipped = zipFeaturedHighlights([
+    [{ gameId: 'a', gameName: 'A', media: first[0] }],
+    [
+      { gameId: 'b', gameName: 'B', media: first[1] },
+      { gameId: 'b', gameName: 'B', media: first[2] },
+    ],
+  ]);
+  assert.deepEqual(
+    zipped.map((item) => item.gameId),
+    ['a', 'b', 'b'],
+  );
+
+  assert.equal(
+    gameMetadataUrl(DEFAULT_MEDIA_BUCKET_URL, 'Battlefield 6'),
+    `${DEFAULT_MEDIA_BUCKET_URL}/Battlefield%206/metadata.json`,
+  );
 });

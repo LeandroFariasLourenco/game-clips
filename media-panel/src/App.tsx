@@ -22,7 +22,7 @@ import {
   withFileMtimes,
   type PickedSource,
 } from "./api";
-import { fileBaseName, mediaDestination, standardizedMediaName, uniqueMediaNames } from "./mediaNames";
+import { fileBaseName, mediaDestination, sequentialMediaNames } from "./mediaNames";
 import { CreateGameModal } from "./CreateGameModal";
 import { Icon } from "./icons";
 import { LocalImport } from "./LocalImport";
@@ -192,10 +192,13 @@ function App() {
       kind === "image"
         ? listing?.images.map((file) => file.name) ?? []
         : listing?.videos.map((file) => file.name) ?? [];
-    const nextNames = uniqueMediaNames(
-      sources.map((source) =>
-        standardizedMediaName(source.name, sourceLastModified(source), kind),
-      ),
+    const nextNames = sequentialMediaNames(
+      sources.map((source) => ({
+        date: sourceLastModified(source),
+        originalName: source.name,
+      })),
+      selectedName,
+      kind,
       reserved,
     );
     setPendingUpload({
@@ -1091,8 +1094,8 @@ function UploadConfirmDialog({
         </header>
         <div className="confirm-body">
           <p>
-            Os arquivos serão enviados com o padrão <code>dataehora-nomeoriginal.extensão</code>, usando a data de
-            modificação do sistema.
+            Os arquivos serão enviados com o padrão <code>YYYY-MM-DDTHHmmssZ_Jogo#n.ext</code>, em UTC, com nome
+            sequencial do jogo.
           </p>
           <ul className="upload-preview-list">
             {items.map((item, index) => (

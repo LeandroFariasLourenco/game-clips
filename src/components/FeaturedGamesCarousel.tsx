@@ -9,18 +9,24 @@ import { gameDetailsPath } from '../libraryContext';
 import { driveAssetService } from '../services/driveAssetService';
 import { ShimmerImage } from '../directives/ShimmerImage';
 import { pageTransition } from '../motion';
+import { formatRemaining } from '../utils/featuredRotation';
 import 'swiper/css';
 import 'swiper/css/navigation';
 import 'swiper/css/pagination';
 
 interface FeaturedGamesCarouselProps {
   games: Game[];
+  remainingMs: number;
 }
 
-export const FeaturedGamesCarousel: React.FC<FeaturedGamesCarouselProps> = ({ games }) => {
+export const FeaturedGamesCarousel: React.FC<FeaturedGamesCarouselProps> = ({
+  games,
+  remainingMs,
+}) => {
   if (games.length === 0) return null;
 
   const canLoop = games.length > 1;
+  const remainingLabel = formatRemaining(remainingMs);
 
   return (
     <motion.section
@@ -29,11 +35,19 @@ export const FeaturedGamesCarousel: React.FC<FeaturedGamesCarouselProps> = ({ ga
       animate={{ opacity: 1, y: 0 }}
       transition={pageTransition}
     >
-      <div className="flex items-center gap-2 mb-2 sm:mb-4 px-1">
-        <Sparkles className="w-5 h-5 text-amber-500" />
-        <h2 className="text-sm font-bold tracking-wider uppercase text-zinc-300 font-sans">
-          Em destaque hoje
-        </h2>
+      <div className="flex items-center justify-between gap-3 mb-2 sm:mb-4 px-1">
+        <div className="flex items-center gap-2 min-w-0">
+          <Sparkles className="w-5 h-5 text-amber-500 shrink-0" />
+          <h2 className="text-sm font-bold tracking-wider uppercase text-zinc-300 font-sans">
+            Em destaque
+          </h2>
+        </div>
+        <p
+          className="text-[11px] sm:text-xs font-mono text-zinc-500 shrink-0 tabular-nums"
+          aria-live="polite"
+        >
+          Novos em {remainingLabel}
+        </p>
       </div>
 
       <Swiper

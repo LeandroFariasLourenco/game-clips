@@ -62,9 +62,9 @@ Capa, banner e ícone **não** entram no JSON. Clips soltos em `videos/*.mp4` n�
 
 Remoção de jogo: botão direito na lista da esquerda. Só é permitido sem screenshots nem clips. Remoção de screenshot/clip: botão direito na linha da listagem (não há ícone de lixeira visível). Em seguida `DELETE /api/games/:nome/file?key=…` ou comando `delete_media`. Só aceita keys em `images/` ou `videos/`. Clip em pasta apaga a pasta inteira (`mp4` + `thumb.jpg`). Depois o painel regenera `metadata.json`. **Nunca** apague pelo frontend sem a janela de confirmação.
 
-A listagem de imagens e vídeos mostra a inserção a partir do `LastModified` do objeto no S3. A data original do arquivo fica no nome (`YYYYMMDDHHmmss-…`).
+A listagem de imagens e vídeos mostra a inserção a partir do `LastModified` do objeto no S3. A data original do arquivo fica no nome (`YYYY-MM-DDTHHmmssZ_Jogo#n`, UTC a partir da coluna Data do Explorer).
 
-Upload de screenshot/clip (botão ou arraste, um ou vários arquivos): o painel mostra o nome final `YYYYMMDDHHmmss-nomeoriginal.ext` (mtime local) e só envia depois da confirmação. Capa, banner e ícone não usam esse padrão.
+Upload de screenshot/clip (botão ou arraste, um ou vários arquivos): o painel mostra o nome final `YYYY-MM-DDTHHmmssZ_Jogo#n.ext` (UTC + sequência) e só envia depois da confirmação. Capa, banner e ícone não usam esse padrão.
 
 ## Dois runtimes
 
@@ -80,7 +80,7 @@ No navegador, capas passam por `/api/asset?key=…` (cache local). No Tauri, as 
 
 ## Pasta local
 
-`server/localMedia.ts` aponta para `../media` (raiz do repo, no `.gitignore` da biblioteca). O sync: (1) padroniza nomes `YYYYMMDDHHmmss-nome.ext` (mtime local) em `images/` e clips, move clips para subpastas, gera `thumb.jpg` com ffmpeg, grava `metadata.json`; (2) `aws s3 sync` da pasta inteira. Exige AWS CLI e ffmpeg no PATH.
+`server/localMedia.ts` aponta para `../media` (raiz do repo, no `.gitignore` da biblioteca). O sync: (1) padroniza nomes `YYYY-MM-DDTHHmmssZ_Jogo#n.ext` (UTC + sequência) em `images/` e clips, move clips para subpastas, gera `thumb.jpg` com ffmpeg, grava `metadata.json`; (2) `aws s3 sync` da pasta inteira. Exige AWS CLI e ffmpeg no PATH.
 
 ## Frontend
 

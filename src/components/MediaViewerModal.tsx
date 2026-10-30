@@ -60,10 +60,42 @@ function clampOffset(
   return { x: nextX, y: nextY };
 }
 
+let bodyScrollLocks = 0;
+let lockedBodyStyles: {
+  bodyOverflow: string;
+  htmlOverflow: string;
+  paddingRight: string;
+} | null = null;
+
+function lockBodyScroll() {
+  if (bodyScrollLocks === 0) {
+    const scrollbarGap = window.innerWidth - document.documentElement.clientWidth;
+    lockedBodyStyles = {
+      bodyOverflow: document.body.style.overflow,
+      htmlOverflow: document.documentElement.style.overflow,
+      paddingRight: document.body.style.paddingRight,
+    };
+    document.documentElement.style.overflow = 'hidden';
+    document.body.style.overflow = 'hidden';
+    if (scrollbarGap > 0) {
+      document.body.style.paddingRight = `${scrollbarGap}px`;
+    }
+  }
+  bodyScrollLocks += 1;
+}
+
+function unlockBodyScroll() {
+  bodyScrollLocks = Math.max(0, bodyScrollLocks - 1);
+  if (bodyScrollLocks > 0 || !lockedBodyStyles) return;
+  document.body.style.overflow = lockedBodyStyles.bodyOverflow;
+  document.documentElement.style.overflow = lockedBodyStyles.htmlOverflow;
+  document.body.style.paddingRight = lockedBodyStyles.paddingRight;
+  lockedBodyStyles = null;
+}
+
 export const MediaViewerModal: React.FC<MediaViewerModalProps> = ({ media, onClose }) => {
   useEffect(() => {
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
+    lockBodyScroll();
 
     function handleKeyDown(event: KeyboardEvent) {
       if (event.key === 'Escape') onClose();
@@ -71,14 +103,14 @@ export const MediaViewerModal: React.FC<MediaViewerModalProps> = ({ media, onClo
 
     window.addEventListener('keydown', handleKeyDown);
     return () => {
-      document.body.style.overflow = previousOverflow;
+      unlockBodyScroll();
       window.removeEventListener('keydown', handleKeyDown);
     };
   }, [onClose]);
 
   return (
     <motion.div
-      className="fixed inset-0 z-50 bg-black/90 backdrop-blur-md"
+      className="fixed inset-0 z-50 overflow-y-auto overscroll-none bg-black/90 backdrop-blur-md"
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}

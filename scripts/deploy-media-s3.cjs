@@ -5,7 +5,6 @@ const dotenv = require('dotenv');
 
 const PROJECT_ROOT = path.join(__dirname, '..');
 const DEFAULT_MEDIA_ROOT = path.join(PROJECT_ROOT, 'media');
-const THUMBS_SCRIPT = path.join(__dirname, 'generate-video-thumbnails.cjs');
 
 dotenv.config({ path: path.join(PROJECT_ROOT, '.env'), quiet: true });
 dotenv.config({ path: path.join(PROJECT_ROOT, '.env.local'), override: true, quiet: true });
@@ -14,13 +13,11 @@ function parseArgs(argv) {
   const options = {
     root: DEFAULT_MEDIA_ROOT,
     dryRun: false,
-    forceThumbs: false,
   };
 
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     if (arg === '--dry-run') options.dryRun = true;
-    else if (arg === '--force') options.forceThumbs = true;
     else if (arg === '--root') {
       options.root = path.resolve(argv[i + 1] || '');
       i += 1;
@@ -41,7 +38,7 @@ function resolveBucketUri() {
   const raw = readEnv('AWS_S3_BUCKET') || readEnv('AWS_S3-BUCKET');
   if (!raw) {
     throw new Error(
-      'Defina AWS_S3_BUCKET (ou AWS_S3-BUCKET) no ambiente ou no .env. Ex.: s3://meu-bucket ou meu-bucket'
+      'Defina AWS_S3_BUCKET (ou AWS_S3-BUCKET) no ambiente ou no .env. Ex.: s3://meu-bucket ou meu-bucket',
     );
   }
   return raw.startsWith('s3://') ? raw.replace(/\/+$/, '') : `s3://${raw.replace(/^\/+|\/+$/g, '')}`;
@@ -82,15 +79,6 @@ function main() {
     process.exit(1);
   }
 
-  if (!fs.existsSync(THUMBS_SCRIPT)) {
-    console.error(`Script de thumbs não encontrado: ${THUMBS_SCRIPT}`);
-    process.exit(1);
-  }
-
-  const thumbsArgs = [THUMBS_SCRIPT, '--root', options.root];
-  if (options.dryRun) thumbsArgs.push('--dry-run');
-  if (options.forceThumbs) thumbsArgs.push('--force');
-
   const syncArgs = ['s3', 'sync', options.root, bucket, '--region', region];
   if (options.dryRun) syncArgs.push('--dryrun');
 
@@ -98,10 +86,9 @@ function main() {
   console.log(`  pasta:  ${options.root}`);
   console.log(`  bucket: ${bucket}`);
   console.log(`  região: ${region}`);
-  if (options.dryRun) console.log('  modo:   dry-run (nada será gravado no disco nem no S3)');
+  if (options.dryRun) console.log('  modo:   dry-run (nada será enviado ao S3)');
 
-  run(process.execPath, thumbsArgs, '1/2 Gerar thumbnails de vídeos');
-  run('aws', syncArgs, '2/2 Sync para o S3');
+  run('aws', syncArgs, 'Sync para o S3');
 
   console.log('\n✅ Deploy de mídia concluído.\n');
 }

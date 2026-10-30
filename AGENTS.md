@@ -17,7 +17,9 @@ Cada jogo tem uma pasta com o mesmo nome (caracteres inválidos de filesystem re
   icon.png       # ícone
   images/        # screenshots: .jpg (renomear .jpeg → .jpg); .png permitido na galeria
   videos/        # clips: cada .mp4 solto vira <nome-do-clip>/<nome-do-clip>.mp4 + thumb.jpg
-                 # nomes: YYYYMMDDHHmmss-nomeoriginal.ext (mtime local; generate-video-thumbnails.cjs)
+                 # nomes: YYYY-MM-DDTHHmmssZ_Jogo#n.ext (UTC + sequência)
+                 # preparar: npm run media:names / media:folders / media:thumbs / media:metadata
+                 # enviar: npm run deploy:media (apenas aws s3 sync)
 ```
 
 Constantes em `src/config/mediaConfig.ts` (`GAME_BRANDING_ASSETS`, `DEFAULT_MEDIA_BUCKET_URL`).

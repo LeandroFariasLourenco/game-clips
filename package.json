@@ -12,7 +12,10 @@
     "lint": "tsc --noEmit",
     "deploy:media": "node scripts/deploy-media-s3.cjs",
     "panel:dev": "npm --prefix media-panel run tauri -- dev",
-    "thumbs:videos": "node scripts/generate-video-thumbnails.cjs"
+    "media:names": "node scripts/prepare-media-names.cjs",
+    "media:folders": "node scripts/prepare-media-video-folders.cjs",
+    "media:thumbs": "node scripts/prepare-media-thumbs.cjs",
+    "media:metadata": "node scripts/prepare-media-metadata.cjs"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.3.3",

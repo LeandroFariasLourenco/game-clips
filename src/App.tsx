@@ -90,7 +90,7 @@ export default function App() {
     <LibraryContext.Provider value={outletContext}>
     <MotionConfig reducedMotion="user">
     <div className="min-h-screen bg-[#121212] text-zinc-100 flex flex-col selection:bg-purple-600 selection:text-white overflow-x-clip">
-      <ScrollRestoration />
+      <ScrollRestoration getKey={(location) => location.pathname} />
 
       {syncNotification && (
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-4">

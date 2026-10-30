@@ -16,6 +16,16 @@ export function localDateKey(now: Date = new Date()): string {
   return `${year}-${month}-${day}`;
 }
 
+export function nextDailyFeaturedAt(now: Date = new Date()): Date {
+  const next = new Date(now);
+  next.setHours(24, 0, 0, 0);
+  return next;
+}
+
+export function msUntilNextDailyFeatured(now: Date = new Date()): number {
+  return Math.max(0, nextDailyFeaturedAt(now).getTime() - now.getTime());
+}
+
 export function pickDailyFeaturedGames(
   games: Game[],
   count = DAILY_FEATURED_COUNT,

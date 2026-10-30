@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
-import { existsSync } from "node:fs";
-import { mkdir, readdir, readFile, rename, stat, writeFile } from "node:fs/promises";
+import { existsSync, statSync } from "node:fs";
+import { mkdir, readdir, readFile, rename, writeFile } from "node:fs/promises";
 import { basename, dirname, extname, join, parse, resolve } from "node:path";
 import {
   IMAGE_EXTENSIONS,
@@ -11,6 +11,13 @@ import {
   serializeGameMetadata,
   type GameMetadata,
 } from "./gameMetadata.ts";
+import {
+  buildStandardizedMediaName,
+  formatUtcStamp,
+  mediaFileLabel,
+  parseStandardizedMediaName,
+  readItemDates,
+} from "./itemDate.ts";
 
 export { METADATA_FILE, type GameMetadata, type GameMetadataVideo } from "./gameMetadata.ts";
 
@@ -53,21 +60,16 @@ function isGalleryImage(fileName: string): boolean {
   return IMAGE_EXTENSIONS.has(extname(fileName).toLowerCase());
 }
 
-const STANDARDIZED_STEM = /^\d{14}-.+/;
-
-function pad2(value: number): string {
-  return String(value).padStart(2, "0");
+function nextSequence(used: Set<number>): number {
+  let sequence = 1;
+  while (used.has(sequence)) sequence += 1;
+  return sequence;
 }
 
-function formatLocalTimestamp(date: Date): string {
-  return (
-    `${date.getFullYear()}${pad2(date.getMonth() + 1)}${pad2(date.getDate())}` +
-    `${pad2(date.getHours())}${pad2(date.getMinutes())}${pad2(date.getSeconds())}`
-  );
-}
-
-function isStandardizedFileName(fileName: string): boolean {
-  return STANDARDIZED_STEM.test(parse(fileName).name);
+function targetExt(fileName: string, kind: "images" | "videos"): string {
+  const ext = extname(fileName).toLowerCase();
+  if (kind === "images" && (ext === ".jpeg" || ext === ".jpg")) return ".jpg";
+  return ext;
 }
 
 async function uniqueName(parentDir: string, name: string, sourcePath: string, asDir: boolean): Promise<string> {
@@ -82,49 +84,105 @@ async function uniqueName(parentDir: string, name: string, sourcePath: string, a
   }
 }
 
-async function renameToStandard(filePath: string): Promise<{ renamed: boolean; fileName: string }> {
-  const dirPath = dirname(filePath);
-  const fileName = basename(filePath);
-  const stamp = isStandardizedFileName(fileName)
-    ? ""
-    : formatLocalTimestamp((await stat(filePath)).mtime);
-  const desired = isStandardizedFileName(fileName)
-    ? fileName
-    : `${stamp}-${parse(fileName).name}${parse(fileName).ext}`;
-  const nextName = await uniqueName(dirPath, desired, filePath, false);
-  if (nextName === fileName) return { renamed: false, fileName };
-  await rename(filePath, join(dirPath, nextName));
-  return { renamed: true, fileName: nextName };
-}
+async function applyGroupNames(
+  gameName: string,
+  kind: "images" | "videos",
+  files: string[],
+): Promise<number> {
+  const label = mediaFileLabel(gameName);
+  const used = new Set<number>();
+  const dates = readItemDates(files);
+  const pending: Array<{ filePath: string; date: Date }> = [];
+  const restamp: Array<{ filePath: string; date: Date; sequence: number }> = [];
 
-async function applyTimestampNames(imagesDir: string, videosDir: string): Promise<number> {
-  let renamed = 0;
-
-  if (existsSync(imagesDir)) {
-    for (const fileName of (await listNames(imagesDir)).filter(isGalleryImage)) {
-      const result = await renameToStandard(join(imagesDir, fileName));
-      if (result.renamed) renamed += 1;
+  for (const filePath of files) {
+    const parsed = parseStandardizedMediaName(basename(filePath));
+    const date = dates.get(resolve(filePath)) ?? statSyncOrNow(filePath);
+    if (parsed && parsed.game === label) {
+      used.add(parsed.sequence);
+      if (parsed.stamp !== formatUtcStamp(date)) restamp.push({ filePath, date, sequence: parsed.sequence });
+    } else {
+      pending.push({ filePath, date });
     }
   }
 
-  if (!existsSync(videosDir)) return renamed;
+  pending.sort((a, b) => {
+    if (a.date.getTime() !== b.date.getTime()) return a.date.getTime() - b.date.getTime();
+    return basename(a.filePath).localeCompare(basename(b.filePath), "pt");
+  });
 
-  for (const fileName of (await listNames(videosDir)).filter(isMp4)) {
-    const result = await renameToStandard(join(videosDir, fileName));
-    if (result.renamed) renamed += 1;
+  const plans = [
+    ...restamp.map(({ filePath, date, sequence }) => ({
+      filePath,
+      nextPath: join(dirname(filePath), buildStandardizedMediaName(date, gameName, sequence, targetExt(filePath, kind))),
+    })),
+    ...pending.map(({ filePath, date }) => {
+      const sequence = nextSequence(used);
+      used.add(sequence);
+      return {
+        filePath,
+        nextPath: join(dirname(filePath), buildStandardizedMediaName(date, gameName, sequence, targetExt(filePath, kind))),
+      };
+    }),
+  ];
+
+  const temps: Array<{ tempPath: string; nextPath: string }> = [];
+  for (const plan of plans) {
+    if (resolve(plan.filePath) === resolve(plan.nextPath)) continue;
+    const tempPath = join(
+      dirname(plan.filePath),
+      `.renaming-${process.pid}-${Math.random().toString(16).slice(2)}${extname(plan.nextPath)}`,
+    );
+    await rename(plan.filePath, tempPath);
+    temps.push({ tempPath, nextPath: plan.nextPath });
   }
+  for (const plan of temps) {
+    await rename(plan.tempPath, plan.nextPath);
+  }
+  return temps.length;
+}
+
+function statSyncOrNow(filePath: string): Date {
+  try {
+    return statSync(filePath).mtime;
+  } catch {
+    return new Date();
+  }
+}
+
+async function applyTimestampNames(gameName: string, imagesDir: string, videosDir: string): Promise<number> {
+  let renamed = 0;
+  const imageFiles: string[] = [];
+  const videoFiles: string[] = [];
+
+  if (existsSync(imagesDir)) {
+    for (const fileName of (await listNames(imagesDir)).filter(isGalleryImage)) {
+      imageFiles.push(join(imagesDir, fileName));
+    }
+  }
+
+  if (existsSync(videosDir)) {
+    for (const fileName of (await listNames(videosDir)).filter(isMp4)) {
+      videoFiles.push(join(videosDir, fileName));
+    }
+    for (const folder of await listDirs(videosDir)) {
+      const folderPath = join(videosDir, folder);
+      for (const fileName of (await listNames(folderPath)).filter(isMp4)) {
+        videoFiles.push(join(folderPath, fileName));
+      }
+    }
+  }
+
+  renamed += await applyGroupNames(gameName, "images", imageFiles);
+  renamed += await applyGroupNames(gameName, "videos", videoFiles);
+
+  if (!existsSync(videosDir)) return renamed;
 
   for (const folder of await listDirs(videosDir)) {
     const folderPath = join(videosDir, folder);
     const videos = (await listNames(folderPath)).filter(isMp4);
-    const namesAfter: string[] = [];
-    for (const fileName of videos) {
-      const result = await renameToStandard(join(folderPath, fileName));
-      namesAfter.push(result.fileName);
-      if (result.renamed) renamed += 1;
-    }
-    if (namesAfter.length !== 1) continue;
-    const nextFolder = await uniqueName(videosDir, parse(namesAfter[0]).name, folderPath, true);
+    if (videos.length !== 1) continue;
+    const nextFolder = await uniqueName(videosDir, parse(videos[0]).name, folderPath, true);
     if (nextFolder === folder) continue;
     await rename(folderPath, join(videosDir, nextFolder));
     renamed += 1;
@@ -339,10 +397,10 @@ export async function prepareLocalMedia(options: {
     const imagesDir = join(gameDir, "images");
     const videosDir = join(gameDir, "videos");
     try {
-      const stamped = await applyTimestampNames(imagesDir, videosDir);
+      const stamped = await applyTimestampNames(game, imagesDir, videosDir);
       report.renamed += stamped;
       if (stamped > 0) {
-        logLine(options.log, `${game}: ${stamped} arquivo(s) padronizado(s) como dataehora-nome.ext`);
+        logLine(options.log, `${game}: ${stamped} arquivo(s) padronizado(s) como UTC_Jogo#n`);
       }
       if (existsSync(videosDir)) {
         const standardized = await standardizeVideos(videosDir);

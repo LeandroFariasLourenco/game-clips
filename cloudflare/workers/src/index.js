@@ -95,6 +95,12 @@ async function handle(request, env, allowOrigin) {
     }
   }
 
+  if (parts.length === 2 && parts[1].toLowerCase() === "metadata.json") {
+    return serveObject(request, env, allowOrigin, `${game}/metadata.json`, {
+      cache: "no-store",
+    });
+  }
+
   if (parts.length === 2 && isBranding(parts[1])) {
     return serveObject(request, env, allowOrigin, `${game}/${parts[1]}`);
   }
